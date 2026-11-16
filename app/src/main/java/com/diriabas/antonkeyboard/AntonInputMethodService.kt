@@ -141,8 +141,8 @@ class AntonInputMethodService : InputMethodService() {
     private fun saveClipboardHistory() {
         val array = JSONArray()
 
-        clipboardHistory.forEach {
-            array.put(it)
+        clipboardHistory.forEach { item ->
+            array.put(item)
         }
 
         getSharedPreferences(
@@ -187,12 +187,6 @@ class AntonInputMethodService : InputMethodService() {
         if (!text.isNullOrBlank()) {
             addClipboardItem(text)
         }
-    }
-
-    private fun clearClipboardHistory() {
-        clipboardHistory.clear()
-        saveClipboardHistory()
-        showClipboard()
     }
 
     private fun renderKeyboard(root: LinearLayout) {
@@ -555,10 +549,7 @@ class AntonInputMethodService : InputMethodService() {
 
         clipboardHistory.forEachIndexed { index, item ->
             val row = newRow()
-
-            val preview = item
-                .replace("\n", " ")
-                .take(55)
+            val preview = item.replace("\n", " ").take(55)
 
             addKey(
                 row,
