@@ -3,6 +3,7 @@ package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
 import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,9 +12,11 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
+import org.json.JSONArray
 
 class AntonInputMethodService : InputMethodService() {
 
@@ -27,6 +30,9 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
+
+    private val clipboardHistory = mutableListOf<String>()
+    private val maxClipboardItems = 20
 
     private val backgroundColor = Color.rgb(14, 17, 29)
     private val keyColor = Color.rgb(34, 40, 59)
@@ -92,6 +98,11 @@ class AntonInputMethodService : InputMethodService() {
         "understand", "unfortunately"
     )
 
+    override fun onCreate() {
+        super.onCreate()
+        loadClipboardHistory()
+    }
+
     override fun onCreateInputView(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -102,6 +113,86 @@ class AntonInputMethodService : InputMethodService() {
         keyboardRoot = root
         renderKeyboard(root)
         return root
+    }
+
+    private fun loadClipboardHistory() {
+        val prefs = getSharedPreferences(
+            "anton_keyboard",
+            Context.MODE_PRIVATE
+        )
+
+        val saved = prefs.getString("clipboard_history", "[]") ?: "[]"
+
+        try {
+            val array = JSONArray(saved)
+            clipboardHistory.clear()
+
+            for (i in 0 until array.length()) {
+                val item = array.optString(i)
+                if (item.isNotBlank()) {
+                    clipboardHistory.add(item)
+                }
+            }
+        } catch (_: Exception) {
+            clipboardHistory.clear()
+        }
+    }
+
+    private fun saveClipboardHistory() {
+        val array = JSONArray()
+
+        clipboardHistory.forEach {
+            array.put(it)
+        }
+
+        getSharedPreferences(
+            "anton_keyboard",
+            Context.MODE_PRIVATE
+        ).edit()
+            .putString("clipboard_history", array.toString())
+            .apply()
+    }
+
+    private fun addClipboardItem(text: String) {
+        val cleaned = text.trim()
+
+        if (cleaned.isEmpty()) return
+
+        clipboardHistory.remove(cleaned)
+        clipboardHistory.add(0, cleaned)
+
+        while (clipboardHistory.size > maxClipboardItems) {
+            clipboardHistory.removeAt(clipboardHistory.lastIndex)
+        }
+
+        saveClipboardHistory()
+    }
+
+    private fun captureCurrentClipboard() {
+        val manager = getSystemService(
+            CLIPBOARD_SERVICE
+        ) as ClipboardManager
+
+        val clip = if (manager.hasPrimaryClip()) {
+            manager.primaryClip
+        } else {
+            null
+        }
+
+        val text = clip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(this)
+            ?.toString()
+
+        if (!text.isNullOrBlank()) {
+            addClipboardItem(text)
+        }
+    }
+
+    private fun clearClipboardHistory() {
+        clipboardHistory.clear()
+        saveClipboardHistory()
+        showClipboard()
     }
 
     private fun renderKeyboard(root: LinearLayout) {
@@ -266,7 +357,6 @@ class AntonInputMethodService : InputMethodService() {
     private fun showSuggestions(root: LinearLayout) {
         val word = getCurrentWord()
         val suggestions = getSuggestions(word)
-
         val row = newRow()
 
         if (suggestions.isEmpty()) {
@@ -330,15 +420,13 @@ class AntonInputMethodService : InputMethodService() {
                 if (it !in results) results.add(it)
             }
 
-        return results
-            .take(3)
-            .map { suggestion ->
-                if (word.firstOrNull()?.isUpperCase() == true) {
-                    suggestion.replaceFirstChar { it.uppercase() }
-                } else {
-                    suggestion
-                }
+        return results.take(3).map { suggestion ->
+            if (word.firstOrNull()?.isUpperCase() == true) {
+                suggestion.replaceFirstChar { it.uppercase() }
+            } else {
+                suggestion
             }
+        }
     }
 
     private fun replaceCurrentWord(suggestion: String) {
@@ -433,53 +521,79 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun showClipboard() {
-        val manager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-
-        val clip = if (manager.hasPrimaryClip()) {
-            manager.primaryClip
-        } else {
-            null
-        }
-
-        val text = clip?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)
-            ?.coerceToText(this)
-            ?.toString()
+        captureCurrentClipboard()
 
         val root = keyboardRoot ?: return
         root.removeAllViews()
 
-        root.addView(createLabel("CLIPBOARD"))
+        root.addView(createLabel("📋 CLIPBOARD HISTORY"))
 
-        if (text.isNullOrEmpty()) {
-            root.addView(createLabel("Буфер обмена пуст"))
-        } else {
-            val preview = TextView(this).apply {
-                this.text = text.take(300)
-                textSize = 15f
-                setTextColor(Color.WHITE)
-                setPadding(dp(12), dp(12), dp(12), dp(12))
-                background = rounded(keyColor, 14)
-            }
+        val controls = newRow()
 
-            root.addView(preview)
-
-            val row = newRow()
-
-            addKey(row, "Вставить", 2f, accentColor) {
-                currentInputConnection?.commitText(text, 1)
-            }
-
-            root.addView(row)
+        addKey(controls, "Очистить историю", 2f, violetColor) {
+            clearClipboardHistory()
         }
 
-        val row = newRow()
-
-        addKey(row, "Назад", 1f, violetColor) {
+        addKey(controls, "Назад", 1f) {
             refresh()
         }
 
-        root.addView(row)
+        root.addView(controls)
+
+        if (clipboardHistory.isEmpty()) {
+            root.addView(createLabel("История пока пуста"))
+            return
+        }
+
+        val scrollView = ScrollView(this).apply {
+            isFillViewport = false
+        }
+
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        clipboardHistory.forEachIndexed { index, item ->
+            val row = newRow()
+
+            val preview = item
+                .replace("\n", " ")
+                .take(55)
+
+            addKey(
+                row,
+                "${index + 1}. $preview",
+                1f,
+                keyColor
+            ) {
+                currentInputConnection?.commitText(item, 1)
+
+                Toast.makeText(
+                    this,
+                    "Текст вставлен",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+
+            list.addView(row)
+        }
+
+        scrollView.addView(list)
+
+        root.addView(
+            scrollView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+    }
+
+    private fun clearClipboardHistory() {
+        clipboardHistory.clear()
+        saveClipboardHistory()
+        showClipboard()
     }
 
     private fun showAI(root: LinearLayout) {
