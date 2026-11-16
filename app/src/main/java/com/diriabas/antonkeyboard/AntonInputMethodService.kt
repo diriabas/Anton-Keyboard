@@ -2,7 +2,6 @@
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -10,10 +9,12 @@ import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 
 class AntonInputMethodService : InputMethodService() {
 
@@ -32,6 +33,17 @@ class AntonInputMethodService : InputMethodService() {
     private val keyColor = Color.rgb(34, 40, 59)
     private val accentColor = Color.rgb(67, 205, 255)
     private val violetColor = Color.rgb(153, 111, 255)
+
+    private val corrections = mapOf(
+        "превет" to "привет",
+        "спосибо" to "спасибо",
+        "пожалуста" to "пожалуйста",
+        "здравствуйтее" to "здравствуйте",
+        "teh" to "the",
+        "adn" to "and",
+        "recieve" to "receive",
+        "becouse" to "because"
+    )
 
     override fun onCreateInputView(): View {
         val root = LinearLayout(this).apply {
@@ -70,11 +82,8 @@ class AntonInputMethodService : InputMethodService() {
             background = rounded(violetColor, 12)
         }
 
-        header.addView(logo, LinearLayout.LayoutParams(
-            0, dp(35), 1f
-        ))
+        header.addView(logo, LinearLayout.LayoutParams(0, dp(35), 1f))
         header.addView(language)
-
         root.addView(header)
 
         val toolbar = newRow()
@@ -121,7 +130,7 @@ class AntonInputMethodService : InputMethodService() {
             isSymbols -> listOf(
                 listOf("1","2","3","4","5","6","7","8","9","0"),
                 listOf("@","#","$","%","&","-","+","(",")","/"),
-                listOf("*","\"","'",";",":","!","?","⌫")
+                listOf("*","\"","'",";",":","!","?")
             )
 
             isRussian -> listOf(
@@ -141,16 +150,19 @@ class AntonInputMethodService : InputMethodService() {
             val row = newRow()
 
             if (index == 2) {
-                addKey(row, if (capsLock) "⇪" else "⇧", 1.3f,
-                    if (shift || capsLock) violetColor else keyColor) {
+                addKey(
+                    row,
+                    if (capsLock) "⇪" else "⇧",
+                    1.3f,
+                    if (shift || capsLock) violetColor else keyColor
+                ) {
                     handleShift()
                 }
             }
 
             keys.forEach { key ->
                 addKey(row, displayLetter(key), 1f) {
-                    val value = displayLetter(key)
-                    currentInputConnection?.commitText(value, 1)
+                    currentInputConnection?.commitText(displayLetter(key), 1)
 
                     if (shift && !capsLock) {
                         shift = false
@@ -180,7 +192,7 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(bottom, "Пробел", 4f, keyColor) {
-            currentInputConnection?.commitText(" ", 1)
+            commitSpaceWithCorrection()
         }
 
         addKey(bottom, ".", 0.8f) {
@@ -194,12 +206,36 @@ class AntonInputMethodService : InputMethodService() {
         root.addView(bottom)
     }
 
-    private fun displayLetter(letter: String): String {
-        return if (shift || capsLock) {
-            letter.uppercase()
-        } else {
-            letter
+    private fun commitSpaceWithCorrection() {
+        val connection = currentInputConnection ?: return
+
+        val before = connection
+            .getTextBeforeCursor(50, 0)
+            ?.toString() ?: ""
+
+        val match = Regex("""([А-Яа-яЁёA-Za-z]+)$""").find(before)
+
+        if (match != null) {
+            val word = match.value
+            val corrected = corrections[word.lowercase(Locale.ROOT)]
+
+            if (corrected != null) {
+                val result = if (word.first().isUpperCase()) {
+                    corrected.replaceFirstChar { it.uppercase() }
+                } else {
+                    corrected
+                }
+
+                connection.deleteSurroundingText(word.length, 0)
+                connection.commitText(result, 1)
+            }
         }
+
+        connection.commitText(" ", 1)
+    }
+
+    private fun displayLetter(letter: String): String {
+        return if (shift || capsLock) letter.uppercase() else letter
     }
 
     private fun handleShift() {
@@ -224,18 +260,15 @@ class AntonInputMethodService : InputMethodService() {
             listOf("🎉","✨","⭐","🌹","☀️","🚀","💯")
         )
 
-        val title = createLabel("EMOJI")
-        root.addView(title)
+        root.addView(createLabel("EMOJI"))
 
         emojis.forEach { keys ->
             val row = newRow()
-
             keys.forEach { emoji ->
                 addKey(row, emoji, 1f) {
                     currentInputConnection?.commitText(emoji, 1)
                 }
             }
-
             root.addView(row)
         }
 
@@ -253,9 +286,7 @@ class AntonInputMethodService : InputMethodService() {
     private fun showClipboard() {
         val manager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
 
-        val clip = if (manager.hasPrimaryClip()) {
-            manager.primaryClip
-        } else null
+        val clip = if (manager.hasPrimaryClip()) manager.primaryClip else null
 
         val text = clip?.takeIf { it.itemCount > 0 }
             ?.getItemAt(0)
@@ -264,7 +295,6 @@ class AntonInputMethodService : InputMethodService() {
 
         val root = keyboardRoot ?: return
         root.removeAllViews()
-
         root.addView(createLabel("CLIPBOARD"))
 
         if (text.isNullOrEmpty()) {
@@ -372,11 +402,7 @@ class AntonInputMethodService : InputMethodService() {
             setOnClickListener { action() }
         }
 
-        val params = LinearLayout.LayoutParams(
-            0,
-            dp(46),
-            weight
-        ).apply {
+        val params = LinearLayout.LayoutParams(0, dp(46), weight).apply {
             setMargins(dp(2), dp(3), dp(2), dp(3))
         }
 
