@@ -1,3 +1,4 @@
+
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
@@ -44,10 +45,12 @@ class AntonInputMethodService : InputMethodService() {
     private var autoPunctuationSpaceEnabled = true
     private var autoCapitalizationEnabled = true
 
-    private val backgroundColor = Color.rgb(14, 17, 29)
-    private val keyColor = Color.rgb(34, 40, 59)
-    private val accentColor = Color.rgb(67, 205, 255)
-    private val violetColor = Color.rgb(153, 111, 255)
+    private var selectedTheme = "dark_gray"
+    private var glassTheme = false
+    private var backgroundColor = Color.rgb(14, 17, 29)
+    private var keyColor = Color.rgb(34, 40, 59)
+    private var accentColor = Color.rgb(67, 205, 255)
+    private var violetColor = Color.rgb(153, 111, 255)
 
     private val corrections = mapOf(
         "превет" to "привет",
@@ -113,6 +116,7 @@ class AntonInputMethodService : InputMethodService() {
         loadClipboardHistory()
         loadKeyboardSettings()
         loadPersonalWords()
+        loadTheme()
     }
 
     override fun onCreateInputView(): View {
@@ -159,6 +163,66 @@ class AntonInputMethodService : InputMethodService() {
         autoCorrectionEnabled = prefs.getBoolean("auto_correction", true)
         autoPunctuationSpaceEnabled = prefs.getBoolean("auto_punctuation_space", true)
         autoCapitalizationEnabled = prefs.getBoolean("auto_capitalization", true)
+    }
+
+    private fun loadTheme() {
+        selectedTheme = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+            .getString("keyboard_theme", "dark_gray") ?: "dark_gray"
+        glassTheme = selectedTheme == "glass"
+        applyThemeColors()
+    }
+
+    private fun saveTheme(theme: String) {
+        selectedTheme = theme
+        glassTheme = theme == "glass"
+        getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
+            .putString("keyboard_theme", theme)
+            .apply()
+        applyThemeColors()
+        keyboardRoot?.setBackgroundColor(backgroundColor)
+        window?.window?.navigationBarColor = if (glassTheme) Color.rgb(20, 24, 38) else backgroundColor
+        refresh()
+    }
+
+    private fun applyThemeColors() {
+        when (selectedTheme) {
+            "gray" -> {
+                backgroundColor = Color.rgb(92, 96, 104)
+                keyColor = Color.rgb(119, 124, 133)
+                accentColor = Color.rgb(225, 229, 235)
+                violetColor = Color.rgb(157, 165, 178)
+            }
+            "dark_gray" -> {
+                backgroundColor = Color.rgb(25, 28, 34)
+                keyColor = Color.rgb(47, 52, 61)
+                accentColor = Color.rgb(185, 194, 207)
+                violetColor = Color.rgb(105, 115, 132)
+            }
+            "blue" -> {
+                backgroundColor = Color.rgb(8, 31, 66)
+                keyColor = Color.rgb(20, 62, 112)
+                accentColor = Color.rgb(77, 177, 255)
+                violetColor = Color.rgb(67, 125, 230)
+            }
+            "light_blue" -> {
+                backgroundColor = Color.rgb(190, 220, 242)
+                keyColor = Color.rgb(218, 237, 250)
+                accentColor = Color.rgb(48, 119, 174)
+                violetColor = Color.rgb(91, 153, 211)
+            }
+            "light_green" -> {
+                backgroundColor = Color.rgb(196, 222, 199)
+                keyColor = Color.rgb(220, 239, 221)
+                accentColor = Color.rgb(53, 117, 75)
+                violetColor = Color.rgb(105, 164, 119)
+            }
+            "glass" -> {
+                backgroundColor = Color.rgb(18, 24, 39)
+                keyColor = Color.argb(155, 115, 150, 190)
+                accentColor = Color.argb(210, 205, 231, 255)
+                violetColor = Color.argb(185, 130, 155, 255)
+            }
+        }
     }
 
     private fun saveKeyboardSettings() {
@@ -658,22 +722,13 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun showClipboard() {
         captureCurrentClipboard()
-
         val root = keyboardRoot ?: return
         root.removeAllViews()
-
-        root.addView(createLabel("📋 CLIPBOARD HISTORY"))
+        root.addView(createLabel("БУФЕР ОБМЕНА"))
 
         val controls = newRow()
-
-        addKey(controls, "Очистить историю", 2f, violetColor) {
-            clearClipboardHistory()
-        }
-
-        addKey(controls, "Назад", 1f) {
-            refresh()
-        }
-
+        addKey(controls, "Очистить", 1f, violetColor, keyHeight = 34) { clearClipboardHistory() }
+        addKey(controls, "Назад", 1f, keyHeight = 34) { isSettings = false; refresh() }
         root.addView(controls)
 
         if (clipboardHistory.isEmpty()) {
@@ -681,46 +736,22 @@ class AntonInputMethodService : InputMethodService() {
             return
         }
 
-        val scrollView = ScrollView(this).apply {
-            isFillViewport = false
-        }
-
-        val list = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var tileRow: LinearLayout? = null
         clipboardHistory.forEachIndexed { index, item ->
-            val row = newRow()
-            val preview = item.replace("\n", " ").take(55)
-
-            addKey(
-                row,
-                "${index + 1}. $preview",
-                1f,
-                keyColor
-            ) {
-                currentInputConnection?.commitText(item, 1)
-
-                Toast.makeText(
-                    this,
-                    "Текст вставлен",
-                    Toast.LENGTH_SHORT
-                ).show()
+            if (index % 2 == 0) {
+                tileRow = newRow()
+                content.addView(tileRow)
             }
-
-            list.addView(row)
+            val preview = item.replace("\n", " ").take(58)
+            addTile(tileRow!!, "${index + 1}. $preview", "Нажми, чтобы вставить", false) {
+                currentInputConnection?.commitText(item, 1)
+                Toast.makeText(this, "Текст вставлен", Toast.LENGTH_SHORT).show()
+            }
         }
-
-        scrollView.addView(list)
-
-        root.addView(
-            scrollView,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
     private fun clearClipboardHistory() {
@@ -732,71 +763,128 @@ class AntonInputMethodService : InputMethodService() {
     private fun showSettings() {
         val root = keyboardRoot ?: return
         root.removeAllViews()
-        root.addView(createLabel("⚙ НАСТРОЙКИ"))
+        root.addView(createLabel("НАСТРОЙКИ"))
 
-        addSettingRow(root, "Автокоррекция", autoCorrectionEnabled) {
-            autoCorrectionEnabled = !autoCorrectionEnabled
-            saveKeyboardSettings()
-            showSettings()
-        }
-        addSettingRow(root, "Пробел после знаков и двойной пробел", autoPunctuationSpaceEnabled) {
-            autoPunctuationSpaceEnabled = !autoPunctuationSpaceEnabled
-            saveKeyboardSettings()
-            showSettings()
-        }
-        addSettingRow(root, "Автозаглавная буква", autoCapitalizationEnabled) {
-            autoCapitalizationEnabled = !autoCapitalizationEnabled
-            saveKeyboardSettings()
-            showSettings()
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(createLabel("ФУНКЦИИ"))
+
+        val toggles = listOf(
+            Triple("Автокоррекция", autoCorrectionEnabled) { autoCorrectionEnabled = !autoCorrectionEnabled },
+            Triple("Пробелы после знаков", autoPunctuationSpaceEnabled) { autoPunctuationSpaceEnabled = !autoPunctuationSpaceEnabled },
+            Triple("Автозаглавная", autoCapitalizationEnabled) { autoCapitalizationEnabled = !autoCapitalizationEnabled }
+        )
+        var toggleRow: LinearLayout? = null
+        toggles.forEachIndexed { index, item ->
+            if (index % 2 == 0) {
+                toggleRow = newRow()
+                content.addView(toggleRow)
+            }
+            addTile(toggleRow!!, item.first, if (item.second) "ВКЛ" else "ВЫКЛ", item.second) {
+                item.third.invoke()
+                saveKeyboardSettings()
+                showSettings()
+            }
         }
 
-        root.addView(createLabel("МОЙ СЛОВАРЬ"))
-        root.addView(createLabel("Сначала напечатай слово в поле сообщения, затем нажми кнопку ниже"))
+        content.addView(createLabel("ТЕМА КЛАВИАТУРЫ"))
+        val themes = listOf(
+            Triple("Серая", "gray", Color.rgb(119, 124, 133)),
+            Triple("Тёмно-серая", "dark_gray", Color.rgb(47, 52, 61)),
+            Triple("Синяя", "blue", Color.rgb(20, 62, 112)),
+            Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
+            Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
+            Triple("Стеклянная", "glass", Color.rgb(95, 130, 170))
+        )
+        var themeRow: LinearLayout? = null
+        themes.forEachIndexed { index, theme ->
+            if (index % 2 == 0) {
+                themeRow = newRow()
+                content.addView(themeRow)
+            }
+            addThemeTile(themeRow!!, theme.first, theme.second, theme.third)
+        }
 
+        content.addView(createLabel("МОЙ СЛОВАРЬ"))
+        content.addView(createLabel("Добавь последнее набранное слово или нажми на слово, чтобы удалить его"))
         val addRow = newRow()
-        addKey(addRow, "Добавить последнее слово из текста", 1f, violetColor) {
-            val before = currentInputConnection
-                ?.getTextBeforeCursor(80, 0)
-                ?.toString()
-                .orEmpty()
-                .trimEnd()
+        addKey(addRow, "Добавить последнее слово", 1f, violetColor, keyHeight = 36) {
+            val before = currentInputConnection?.getTextBeforeCursor(80, 0)?.toString().orEmpty().trimEnd()
             val word = Regex("[А-Яа-яЁёA-Za-z-]+$").find(before)?.value.orEmpty()
             addPersonalWord(word)
         }
-        root.addView(addRow)
+        content.addView(addRow)
 
         if (personalWords.isEmpty()) {
-            root.addView(createLabel("Пока нет собственных слов"))
+            content.addView(createLabel("Пока нет собственных слов"))
         } else {
-            root.addView(createLabel("Нажми на слово, чтобы удалить его"))
-            val scroll = ScrollView(this)
-            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            personalWords.toList().forEach { word ->
-                val row = newRow()
-                addKey(row, "✕  $word", 1f, keyColor) {
+            var wordsRow: LinearLayout? = null
+            personalWords.toList().forEachIndexed { index, word ->
+                if (index % 2 == 0) {
+                    wordsRow = newRow()
+                    content.addView(wordsRow)
+                }
+                addTile(wordsRow!!, word, "Удалить", false) {
                     personalWords.remove(word)
                     savePersonalWords()
                     showSettings()
                 }
-                list.addView(row)
             }
-            scroll.addView(list)
-            root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         }
 
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         val back = newRow()
-        addKey(back, "Готово", 1f, accentColor) {
+        addKey(back, "Готово", 1f, accentColor, keyHeight = 34) {
             isSettings = false
             refresh()
         }
         root.addView(back)
     }
 
-    private fun addSettingRow(root: LinearLayout, title: String, enabled: Boolean, action: () -> Unit) {
-        val row = newRow()
-        addKey(row, title, 3f, keyColor, action = action)
-        addKey(row, if (enabled) "ВКЛ" else "ВЫКЛ", 1f, if (enabled) violetColor else keyColor, action = action)
-        root.addView(row)
+    private fun addTile(row: LinearLayout, title: String, subtitle: String, selected: Boolean, action: () -> Unit) {
+        val tile = Button(this).apply {
+            text = "$title\n$subtitle"
+            textSize = 11f
+            isAllCaps = false
+            setTextColor(if (selected) Color.WHITE else textColorForTheme())
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(dp(4), dp(5), dp(4), dp(5))
+            background = rounded(if (selected) violetColor else keyColor, 13)
+            elevation = dp(1).toFloat()
+            setOnClickListener { action() }
+        }
+        val params = LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+            setMargins(dp(3), dp(3), dp(3), dp(3))
+        }
+        row.addView(tile, params)
+    }
+
+    private fun addThemeTile(row: LinearLayout, label: String, theme: String, swatch: Int) {
+        val selected = selectedTheme == theme
+        val tile = Button(this).apply {
+            text = if (selected) "✓  $label" else label
+            textSize = 11f
+            isAllCaps = false
+            setTextColor(if (theme == "light_blue" || theme == "light_green" || theme == "gray") Color.rgb(25, 32, 42) else Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            minHeight = 0
+            minimumHeight = 0
+            background = rounded(if (theme == "glass") Color.argb(185, 95, 130, 170) else swatch, 13)
+            setPadding(dp(3), dp(4), dp(3), dp(4))
+            setOnClickListener { saveTheme(theme) }
+        }
+        row.addView(tile, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+            setMargins(dp(3), dp(3), dp(3), dp(3))
+        })
+    }
+
+    private fun textColorForTheme(): Int {
+        return if (selectedTheme == "light_blue" || selectedTheme == "light_green" || selectedTheme == "gray") Color.rgb(25, 32, 42) else Color.WHITE
     }
 
     private fun showAI(root: LinearLayout) {
@@ -874,7 +962,7 @@ class AntonInputMethodService : InputMethodService() {
             text = label
             textSize = 14f
             isAllCaps = false
-            setTextColor(Color.WHITE)
+            setTextColor(if (color == violetColor || color == accentColor) Color.WHITE else textColorForTheme())
             setTypeface(null, Typeface.BOLD)
             background = rounded(color, 12)
             elevation = dp(2).toFloat()
@@ -933,7 +1021,6 @@ class AntonInputMethodService : InputMethodService() {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(radius).toFloat()
-            setStroke(dp(1), accentColor)
         }
     }
 
