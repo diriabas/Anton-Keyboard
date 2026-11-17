@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -169,7 +170,7 @@ class AntonInputMethodService : InputMethodService() {
                 root,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
+                    FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             )
             val effects = WinterEffectsView(this@AntonInputMethodService)
@@ -183,6 +184,10 @@ class AntonInputMethodService : InputMethodService() {
                 )
             )
         }
+        container.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
         container.requestApplyInsets()
         return container
     }
