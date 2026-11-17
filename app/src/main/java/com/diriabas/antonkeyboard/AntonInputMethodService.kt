@@ -742,8 +742,8 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun addSettingRow(root: LinearLayout, title: String, enabled: Boolean, action: () -> Unit) {
         val row = newRow()
-        addKey(row, title, 3f, keyColor, action)
-        addKey(row, if (enabled) "ВКЛ" else "ВЫКЛ", 1f, if (enabled) violetColor else keyColor, action)
+        addKey(row, title, 3f, keyColor, action = action)
+        addKey(row, if (enabled) "ВКЛ" else "ВЫКЛ", 1f, if (enabled) violetColor else keyColor, action = action)
         root.addView(row)
     }
 
