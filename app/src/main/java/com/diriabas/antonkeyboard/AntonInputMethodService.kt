@@ -24,6 +24,7 @@ class AntonInputMethodService : InputMethodService() {
     private var isSymbols = false
     private var isEmoji = false
     private var isAI = false
+    private var isSettings = false
 
     private var shift = false
     private var capsLock = false
@@ -33,6 +34,11 @@ class AntonInputMethodService : InputMethodService() {
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
+
+    private val personalWords = mutableListOf<String>()
+    private var autoCorrectionEnabled = true
+    private var autoPunctuationSpaceEnabled = true
+    private var autoCapitalizationEnabled = true
 
     private val backgroundColor = Color.rgb(14, 17, 29)
     private val keyColor = Color.rgb(34, 40, 59)
@@ -101,6 +107,8 @@ class AntonInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         loadClipboardHistory()
+        loadKeyboardSettings()
+        loadPersonalWords()
     }
 
     override fun onCreateInputView(): View {
@@ -113,6 +121,61 @@ class AntonInputMethodService : InputMethodService() {
         keyboardRoot = root
         renderKeyboard(root)
         return root
+    }
+
+    private fun loadKeyboardSettings() {
+        val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+        autoCorrectionEnabled = prefs.getBoolean("auto_correction", true)
+        autoPunctuationSpaceEnabled = prefs.getBoolean("auto_punctuation_space", true)
+        autoCapitalizationEnabled = prefs.getBoolean("auto_capitalization", true)
+    }
+
+    private fun saveKeyboardSettings() {
+        getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
+            .putBoolean("auto_correction", autoCorrectionEnabled)
+            .putBoolean("auto_punctuation_space", autoPunctuationSpaceEnabled)
+            .putBoolean("auto_capitalization", autoCapitalizationEnabled)
+            .apply()
+    }
+
+    private fun loadPersonalWords() {
+        val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+        val saved = prefs.getString("personal_words", "[]") ?: "[]"
+        try {
+            val array = JSONArray(saved)
+            personalWords.clear()
+            for (i in 0 until array.length()) {
+                val word = array.optString(i).trim()
+                if (word.isNotEmpty() && word !in personalWords) personalWords.add(word)
+            }
+        } catch (_: Exception) {
+            personalWords.clear()
+        }
+    }
+
+    private fun savePersonalWords() {
+        val array = JSONArray()
+        personalWords.forEach { array.put(it) }
+        getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
+            .putString("personal_words", array.toString())
+            .apply()
+    }
+
+    private fun addPersonalWord(word: String) {
+        val cleaned = word.trim()
+        if (cleaned.isEmpty()) return
+        if (!Regex("^[А-Яа-яЁёA-Za-z-]+$").matches(cleaned)) {
+            Toast.makeText(this, "Используй одно слово без пробелов и символов", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (personalWords.any { it.equals(cleaned, ignoreCase = true) }) {
+            Toast.makeText(this, "Это слово уже есть в словаре", Toast.LENGTH_SHORT).show()
+            return
+        }
+        personalWords.add(0, cleaned)
+        savePersonalWords()
+        Toast.makeText(this, "Слово добавлено", Toast.LENGTH_SHORT).show()
+        showSettings()
     }
 
     private fun loadClipboardHistory() {
@@ -223,6 +286,7 @@ class AntonInputMethodService : InputMethodService() {
         addKey(toolbar, "😊", 1f) {
             isEmoji = !isEmoji
             isAI = false
+            isSettings = false
             isSymbols = false
             refresh()
         }
@@ -230,12 +294,14 @@ class AntonInputMethodService : InputMethodService() {
         addKey(toolbar, "📋", 1f) {
             isEmoji = false
             isAI = false
+            isSettings = false
             showClipboard()
         }
 
         addKey(toolbar, "✦ AI", 1.2f, violetColor) {
             isAI = !isAI
             isEmoji = false
+            isSettings = false
             isSymbols = false
             refresh()
         }
@@ -245,12 +311,22 @@ class AntonInputMethodService : InputMethodService() {
             isSymbols = false
             isEmoji = false
             isAI = false
+            isSettings = false
             refresh()
+        }
+
+        addKey(toolbar, "⚙", 0.9f) {
+            isSettings = !isSettings
+            isEmoji = false
+            isAI = false
+            isSymbols = false
+            if (isSettings) showSettings() else refresh()
         }
 
         root.addView(toolbar)
 
         when {
+            isSettings -> showSettings()
             isAI -> showAI(root)
             isEmoji -> showEmoji(root)
             else -> showLetters(root)
@@ -404,8 +480,12 @@ class AntonInputMethodService : InputMethodService() {
 
         val results = mutableListOf<String>()
 
-        corrections[normalized]?.let {
-            results.add(it)
+        personalWords
+            .filter { it.lowercase(Locale.ROOT).startsWith(normalized) && !it.equals(normalized, ignoreCase = true) }
+            .forEach { if (it !in results) results.add(it) }
+
+        if (autoCorrectionEnabled) {
+            corrections[normalized]?.let { results.add(it) }
         }
 
         dictionary
@@ -444,7 +524,7 @@ class AntonInputMethodService : InputMethodService() {
 
         // Do not accumulate spaces. A second consecutive space becomes ". ".
         if (before.endsWith(" ")) {
-            if (before.length >= 2 && !before[before.length - 2].isWhitespace()) {
+            if (autoPunctuationSpaceEnabled && before.length >= 2 && !before[before.length - 2].isWhitespace()) {
                 val previous = before[before.length - 2]
                 if (previous in ".?!") return
 
@@ -456,7 +536,7 @@ class AntonInputMethodService : InputMethodService() {
 
         val word = getCurrentWord()
 
-        if (word.isNotEmpty()) {
+        if (autoCorrectionEnabled && word.isNotEmpty()) {
             val corrected = corrections[word.lowercase(Locale.ROOT)]
 
             if (corrected != null) {
@@ -483,10 +563,15 @@ class AntonInputMethodService : InputMethodService() {
             connection.deleteSurroundingText(1, 0)
         }
 
-        connection.commitText("$symbol ", 1)
+        if (autoPunctuationSpaceEnabled) {
+            connection.commitText("$symbol ", 1)
+        } else {
+            connection.commitText(symbol, 1)
+        }
     }
 
     private fun shouldCapitalizeNext(): Boolean {
+        if (!autoCapitalizationEnabled) return false
         val before = currentInputConnection
             ?.getTextBeforeCursor(64, 0)
             ?.toString()
@@ -627,6 +712,76 @@ class AntonInputMethodService : InputMethodService() {
         showClipboard()
     }
 
+    private fun showSettings() {
+        val root = keyboardRoot ?: return
+        root.removeAllViews()
+        root.addView(createLabel("⚙ НАСТРОЙКИ ANTON KEYBOARD"))
+
+        addSettingRow(root, "Автокоррекция", autoCorrectionEnabled) {
+            autoCorrectionEnabled = !autoCorrectionEnabled
+            saveKeyboardSettings()
+            showSettings()
+        }
+        addSettingRow(root, "Пробел после знаков и двойной пробел", autoPunctuationSpaceEnabled) {
+            autoPunctuationSpaceEnabled = !autoPunctuationSpaceEnabled
+            saveKeyboardSettings()
+            showSettings()
+        }
+        addSettingRow(root, "Автозаглавная буква", autoCapitalizationEnabled) {
+            autoCapitalizationEnabled = !autoCapitalizationEnabled
+            saveKeyboardSettings()
+            showSettings()
+        }
+
+        root.addView(createLabel("МОЙ СЛОВАРЬ"))
+        root.addView(createLabel("Сначала напечатай слово в поле сообщения, затем нажми кнопку ниже"))
+
+        val addRow = newRow()
+        addKey(addRow, "Добавить последнее слово из текста", 1f, violetColor) {
+            val before = currentInputConnection
+                ?.getTextBeforeCursor(80, 0)
+                ?.toString()
+                .orEmpty()
+                .trimEnd()
+            val word = Regex("[А-Яа-яЁёA-Za-z-]+$").find(before)?.value.orEmpty()
+            addPersonalWord(word)
+        }
+        root.addView(addRow)
+
+        if (personalWords.isEmpty()) {
+            root.addView(createLabel("Пока нет собственных слов"))
+        } else {
+            root.addView(createLabel("Нажми на слово, чтобы удалить его"))
+            val scroll = ScrollView(this)
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            personalWords.toList().forEach { word ->
+                val row = newRow()
+                addKey(row, "✕  $word", 1f, keyColor) {
+                    personalWords.remove(word)
+                    savePersonalWords()
+                    showSettings()
+                }
+                list.addView(row)
+            }
+            scroll.addView(list)
+            root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+
+        val back = newRow()
+        addKey(back, "Готово", 1f, accentColor) {
+            isSettings = false
+            refresh()
+        }
+        root.addView(back)
+    }
+
+    private fun addSettingRow(root: LinearLayout, title: String, enabled: Boolean, action: () -> Unit) {
+        val row = newRow()
+        addKey(row, title, 3f, keyColor, action)
+        addKey(row, if (enabled) "ВКЛ" else "ВЫКЛ", 1f, if (enabled) violetColor else keyColor, action)
+        root.addView(row)
+    }
+
     private fun showAI(root: LinearLayout) {
         root.addView(createLabel("✦ ANTON AI ASSISTANT"))
 
@@ -664,6 +819,7 @@ class AntonInputMethodService : InputMethodService() {
 
         addKey(row, "Назад к клавиатуре", 1f, accentColor) {
             isAI = false
+            isSettings = false
             refresh()
         }
 
