@@ -1,4 +1,3 @@
-
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
@@ -117,9 +116,23 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
+        // Match Android's navigation bar to the keyboard background.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window?.window?.apply {
+                addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                navigationBarColor = backgroundColor
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    navigationBarDividerColor = backgroundColor
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    isNavigationBarContrastEnforced = false
+                }
+            }
+        }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(5), dp(5), dp(5), dp(28))
+            setPadding(dp(5), 0, dp(5), dp(28))
             setBackgroundColor(backgroundColor)
         }
 
@@ -131,7 +144,7 @@ class AntonInputMethodService : InputMethodService() {
                 @Suppress("DEPRECATION")
                 insets.systemWindowInsetBottom
             }
-            view.setPadding(dp(5), dp(5), dp(5), dp(28) + navigationBarBottom)
+            view.setPadding(dp(5), 0, dp(5), dp(28) + navigationBarBottom)
             insets
         }
         root.requestApplyInsets()
@@ -430,19 +443,17 @@ class AntonInputMethodService : InputMethodService() {
     private fun showSuggestions(root: LinearLayout) {
         val word = getCurrentWord()
         val suggestions = getSuggestions(word)
-        val row = newRow()
 
-        if (suggestions.isEmpty()) {
-            row.minimumHeight = dp(20)
-        } else {
-            suggestions.forEach { suggestion ->
-                addKey(row, suggestion, 1f, keyColor) {
-                    replaceCurrentWord(suggestion)
-                    refresh()
-                }
+        // Do not reserve an empty 20dp row: it creates a visible gap above the keys.
+        if (suggestions.isEmpty()) return
+
+        val row = newRow()
+        suggestions.forEach { suggestion ->
+            addKey(row, suggestion, 1f, keyColor) {
+                replaceCurrentWord(suggestion)
+                refresh()
             }
         }
-
         root.addView(row)
     }
 
