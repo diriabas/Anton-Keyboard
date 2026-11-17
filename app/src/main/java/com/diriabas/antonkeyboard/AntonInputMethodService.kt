@@ -5,8 +5,6 @@ import android.inputmethodservice.InputMethodService
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
-import android.graphics.Canvas
-import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
@@ -17,9 +15,7 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.widget.Button
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -40,7 +36,6 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
-    private var winterEffectsView: View? = null
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
@@ -161,44 +156,13 @@ class AntonInputMethodService : InputMethodService() {
         keyboardRoot = root
         renderKeyboard(root)
 
-        // A transparent animated layer draws snow and sparkles without blocking key taps.
-        val container = FrameLayout(this).apply {
-            setBackgroundColor(backgroundColor)
-            clipChildren = false
-            clipToPadding = false
-            addView(
-                root,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
-            val effects = WinterEffectsView(this@AntonInputMethodService)
-            effects.visibility = if (selectedTheme == "winter") View.VISIBLE else View.GONE
-            winterEffectsView = effects
-            addView(
-                effects,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
-        }
-        container.layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-
-        // Ask the IME window itself to wrap the keyboard content height.
-        // The system otherwise keeps the full available height even when the
-        // keyboard view uses WRAP_CONTENT, leaving a large empty animated area.
+        // Keep the IME window close to the actual keyboard content height.
         window?.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT
         )
 
-        container.requestApplyInsets()
-        return container
+        return root
     }
 
     private fun loadKeyboardSettings() {
@@ -209,8 +173,12 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun loadTheme() {
-        selectedTheme = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
-            .getString("keyboard_theme", "dark_gray") ?: "dark_gray"
+        val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+        selectedTheme = prefs.getString("keyboard_theme", "dark_gray") ?: "dark_gray"
+        if (selectedTheme == "winter") {
+            selectedTheme = "dark_gray"
+            prefs.edit().putString("keyboard_theme", selectedTheme).apply()
+        }
         glassTheme = selectedTheme == "glass"
         applyThemeColors()
     }
@@ -223,8 +191,6 @@ class AntonInputMethodService : InputMethodService() {
             .apply()
         applyThemeColors()
         keyboardRoot?.setBackgroundColor(backgroundColor)
-        winterEffectsView?.visibility = if (theme == "winter") View.VISIBLE else View.GONE
-        winterEffectsView?.invalidate()
         window?.window?.navigationBarColor = backgroundColor
         refresh()
     }
@@ -266,12 +232,6 @@ class AntonInputMethodService : InputMethodService() {
                 keyColor = Color.argb(155, 115, 150, 190)
                 accentColor = Color.argb(210, 205, 231, 255)
                 violetColor = Color.argb(185, 130, 155, 255)
-            }
-            "winter" -> {
-                backgroundColor = Color.rgb(7, 20, 48)
-                keyColor = Color.rgb(19, 55, 105)
-                accentColor = Color.rgb(225, 244, 255)
-                violetColor = Color.rgb(80, 157, 235)
             }
         }
     }
@@ -846,7 +806,6 @@ class AntonInputMethodService : InputMethodService() {
             Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
             Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
             Triple("Стеклянная", "glass", Color.rgb(95, 130, 170)),
-            Triple("❄ Новогодняя", "winter", Color.rgb(19, 55, 105))
         )
         var themeRow: LinearLayout? = null
         themes.forEachIndexed { index, theme ->
@@ -1067,92 +1026,6 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         row.addView(button, params)
-    }
-
-    /**
-     * Animated winter overlay: falling snowflakes and softly twinkling ice sparkles.
-     * The view remains transparent and does not consume keyboard touch events.
-     */
-    private inner class WinterEffectsView(context: Context) : View(context) {
-        private val snowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-        }
-        private val icePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(190, 225, 255)
-            style = Paint.Style.STROKE
-            strokeWidth = resources.displayMetrics.density
-            strokeCap = Paint.Cap.ROUND
-        }
-        private val sparklePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(235, 248, 255)
-            style = Paint.Style.FILL
-        }
-        private val startedAt = SystemClock.uptimeMillis()
-
-        init {
-            isClickable = false
-            isFocusable = false
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            if (selectedTheme != "winter" || width <= 0 || height <= 0) return
-
-            val elapsed = (SystemClock.uptimeMillis() - startedAt) / 1000f
-            val w = width.toFloat()
-            val h = height.toFloat()
-            val density = resources.displayMetrics.density
-
-            // Thirty flakes drift down at slightly different speeds.
-            for (i in 0 until 30) {
-                val seed = i * 37.71f
-                val xBase = ((i * 73f + 19f) % 997f) / 997f * w
-                val speed = (18f + (i % 5) * 8f) * density
-                val y = ((i * 91f * density + elapsed * speed) % (h + 24f * density)) - 12f * density
-                val drift = kotlin.math.sin(elapsed * 0.8f + seed) * 9f * density
-                val x = xBase + drift
-                val radius = (1f + (i % 3)) * density
-
-                if (i % 4 == 0) {
-                    drawSnowflake(canvas, x, y, radius * 2.8f, icePaint)
-                } else {
-                    snowPaint.alpha = 125 + (i % 4) * 28
-                    canvas.drawCircle(x, y, radius, snowPaint)
-                }
-            }
-
-            // Eighteen points pulse gently like tiny glittering ice crystals.
-            for (i in 0 until 18) {
-                val phase = elapsed * (1.8f + (i % 3) * 0.35f) + i * 1.73f
-                val pulse = (kotlin.math.sin(phase) + 1f) / 2f
-                val x = ((i * 131f + 47f) % 997f) / 997f * w
-                val y = ((i * 59f + 23f) % 991f) / 991f * h
-                sparklePaint.alpha = (35f + pulse * 150f).toInt()
-                val size = density * (1f + pulse * 1.8f)
-                canvas.drawCircle(x, y, size, sparklePaint)
-
-                if (pulse > 0.78f) {
-                    icePaint.alpha = (pulse * 180f).toInt()
-                    val arm = density * (3f + pulse * 2f)
-                    canvas.drawLine(x - arm, y, x + arm, y, icePaint)
-                    canvas.drawLine(x, y - arm, x, y + arm, icePaint)
-                }
-            }
-
-            postInvalidateDelayed(33L)
-        }
-
-        private fun drawSnowflake(canvas: Canvas, cx: Float, cy: Float, arm: Float, paint: Paint) {
-            paint.alpha = 150
-            for (angle in 0 until 6) {
-                val radians = Math.toRadians((angle * 60).toDouble())
-                val dx = kotlin.math.cos(radians).toFloat() * arm
-                val dy = kotlin.math.sin(radians).toFloat() * arm
-                canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, paint)
-            }
-        }
     }
 
     private fun rounded(color: Int, radius: Int): GradientDrawable {
