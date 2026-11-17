@@ -831,7 +831,7 @@ class AntonInputMethodService : InputMethodService() {
             Triple("Синяя", "blue", Color.rgb(20, 62, 112)),
             Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
             Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
-            Triple("Стеклянная", "glass", Color.rgb(95, 130, 170))
+            Triple("Стеклянная", "glass", Color.rgb(95, 130, 170)),
             Triple("❄ Новогодняя", "winter", Color.rgb(19, 55, 105))
         )
         var themeRow: LinearLayout? = null
