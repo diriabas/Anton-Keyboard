@@ -114,7 +114,7 @@ class AntonInputMethodService : InputMethodService() {
     override fun onCreateInputView(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(5), dp(9), dp(5), dp(8))
+            setPadding(dp(5), dp(5), dp(5), dp(28))
             setBackgroundColor(backgroundColor)
         }
 
@@ -255,35 +255,10 @@ class AntonInputMethodService : InputMethodService() {
     private fun renderKeyboard(root: LinearLayout) {
         root.removeAllViews()
 
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val logo = TextView(this).apply {
-            text = "ANTON  ✦  AI"
-            textSize = 15f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(accentColor)
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val language = TextView(this).apply {
-            text = if (isRussian) "RU" else "EN"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(dp(10), dp(5), dp(10), dp(5))
-            background = rounded(violetColor, 12)
-        }
-
-        header.addView(logo, LinearLayout.LayoutParams(0, dp(35), 1f))
-        header.addView(language)
-        root.addView(header)
-
+        // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
 
-        addKey(toolbar, "😊", 1f) {
+        addKey(toolbar, "😊", 1f, keyColor, keyHeight = 30) {
             isEmoji = !isEmoji
             isAI = false
             isSettings = false
@@ -291,14 +266,14 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "📋", 1f) {
+        addKey(toolbar, "📋", 1f, keyColor, keyHeight = 30) {
             isEmoji = false
             isAI = false
             isSettings = false
             showClipboard()
         }
 
-        addKey(toolbar, "✦ AI", 1.2f, violetColor) {
+        addKey(toolbar, "✦", 1f, violetColor, keyHeight = 30) {
             isAI = !isAI
             isEmoji = false
             isSettings = false
@@ -306,7 +281,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "🌐", 1f) {
+        addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 30) {
             isRussian = !isRussian
             isSymbols = false
             isEmoji = false
@@ -315,7 +290,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "⚙", 0.9f) {
+        addKey(toolbar, "⚙", 0.72f, keyColor, keyHeight = 30) {
             isSettings = !isSettings
             isEmoji = false
             isAI = false
@@ -410,7 +385,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(bottom, "Пробел", 4f, keyColor) {
+        addKey(bottom, "", 4f, keyColor) {
             commitSpaceWithCorrection()
             refresh()
         }
@@ -434,17 +409,7 @@ class AntonInputMethodService : InputMethodService() {
         val row = newRow()
 
         if (suggestions.isEmpty()) {
-            val hint = TextView(this).apply {
-                text = "ANTON  ✦  SMART TYPING"
-                textSize = 11f
-                setTextColor(accentColor)
-                gravity = Gravity.CENTER
-            }
-
-            row.addView(
-                hint,
-                LinearLayout.LayoutParams(0, dp(38), 1f)
-            )
+            row.minimumHeight = dp(20)
         } else {
             suggestions.forEach { suggestion ->
                 addKey(row, suggestion, 1f, keyColor) {
@@ -715,7 +680,7 @@ class AntonInputMethodService : InputMethodService() {
     private fun showSettings() {
         val root = keyboardRoot ?: return
         root.removeAllViews()
-        root.addView(createLabel("⚙ НАСТРОЙКИ ANTON KEYBOARD"))
+        root.addView(createLabel("⚙ НАСТРОЙКИ"))
 
         addSettingRow(root, "Автокоррекция", autoCorrectionEnabled) {
             autoCorrectionEnabled = !autoCorrectionEnabled
@@ -783,10 +748,10 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun showAI(root: LinearLayout) {
-        root.addView(createLabel("✦ ANTON AI ASSISTANT"))
+        root.addView(createLabel("✦ ПОМОЩНИК"))
 
         val info = TextView(this).apply {
-            text = "Твой интеллектуальный помощник.\n\nДля подключения настоящего AI требуется защищённый сервер."
+            text = "Твой интеллектуальный помощник.\n\nДля работы этих функций потребуется защищённый сервер."
             textSize = 14f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -807,7 +772,7 @@ class AntonInputMethodService : InputMethodService() {
             addKey(row, label, 1f, violetColor) {
                 Toast.makeText(
                     this,
-                    "AI-сервер будет подключён на следующем этапе",
+                    "Эта функция появится в следующем обновлении",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -849,11 +814,12 @@ class AntonInputMethodService : InputMethodService() {
         label: String,
         weight: Float,
         color: Int = keyColor,
+        keyHeight: Int = 42,
         action: () -> Unit
     ) {
         val button = Button(this).apply {
             text = label
-            textSize = if (label == "Пробел") 13f else 14f
+            textSize = if (label.isEmpty()) 14f else 14f
             isAllCaps = false
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
@@ -867,7 +833,7 @@ class AntonInputMethodService : InputMethodService() {
 
         val params = LinearLayout.LayoutParams(
             0,
-            dp(42),
+            dp(keyHeight),
             weight
         ).apply {
             setMargins(dp(2), dp(2), dp(2), dp(2))
