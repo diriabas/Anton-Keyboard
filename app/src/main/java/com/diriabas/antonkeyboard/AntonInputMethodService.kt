@@ -180,7 +180,7 @@ class AntonInputMethodService : InputMethodService() {
                 effects,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
+                    FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             )
         }
@@ -188,6 +188,15 @@ class AntonInputMethodService : InputMethodService() {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         )
+
+        // Ask the IME window itself to wrap the keyboard content height.
+        // The system otherwise keeps the full available height even when the
+        // keyboard view uses WRAP_CONTENT, leaving a large empty animated area.
+        window?.window?.setLayout(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+
         container.requestApplyInsets()
         return container
     }
