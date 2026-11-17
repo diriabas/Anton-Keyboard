@@ -290,7 +290,7 @@ class AntonInputMethodService : InputMethodService() {
                     row,
                     if (capsLock) "⇪" else "⇧",
                     1.3f,
-                    if (shift || capsLock) violetColor else keyColor
+                    if (shift || capsLock || shouldCapitalizeNext()) violetColor else keyColor
                 ) {
                     handleShift()
                 }
@@ -298,7 +298,11 @@ class AntonInputMethodService : InputMethodService() {
 
             keys.forEach { key ->
                 addKey(row, displayLetter(key), 1f) {
-                    currentInputConnection?.commitText(displayLetter(key), 1)
+                    if (isSymbols && key in listOf(",", ".", "!", "?", ";", ":")) {
+                        commitPunctuation(key)
+                    } else {
+                        currentInputConnection?.commitText(displayLetter(key), 1)
+                    }
 
                     if (shift && !capsLock) {
                         shift = false
@@ -326,7 +330,7 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(bottom, ",", 0.8f) {
-            currentInputConnection?.commitText(",", 1)
+            commitPunctuation(",")
             refresh()
         }
 
@@ -336,7 +340,7 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(bottom, ".", 0.8f) {
-            currentInputConnection?.commitText(".", 1)
+            commitPunctuation(".")
             refresh()
         }
 
@@ -436,6 +440,20 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun commitSpaceWithCorrection() {
         val connection = currentInputConnection ?: return
+        val before = connection.getTextBeforeCursor(2, 0)?.toString().orEmpty()
+
+        // Do not accumulate spaces. A second consecutive space becomes ". ".
+        if (before.endsWith(" ")) {
+            if (before.length >= 2 && !before[before.length - 2].isWhitespace()) {
+                val previous = before[before.length - 2]
+                if (previous in ".?!") return
+
+                connection.deleteSurroundingText(1, 0)
+                connection.commitText(". ", 1)
+            }
+            return
+        }
+
         val word = getCurrentWord()
 
         if (word.isNotEmpty()) {
@@ -456,8 +474,30 @@ class AntonInputMethodService : InputMethodService() {
         connection.commitText(" ", 1)
     }
 
+    private fun commitPunctuation(symbol: String) {
+        val connection = currentInputConnection ?: return
+        val before = connection.getTextBeforeCursor(1, 0)?.toString().orEmpty()
+
+        // Replace a space before punctuation and add exactly one space after it.
+        if (before == " ") {
+            connection.deleteSurroundingText(1, 0)
+        }
+
+        connection.commitText("$symbol ", 1)
+    }
+
+    private fun shouldCapitalizeNext(): Boolean {
+        val before = currentInputConnection
+            ?.getTextBeforeCursor(64, 0)
+            ?.toString()
+            .orEmpty()
+
+        val trimmed = before.trimEnd()
+        return trimmed.isEmpty() || trimmed.last() in ".?!\n"
+    }
+
     private fun displayLetter(letter: String): String {
-        return if (shift || capsLock) {
+        return if (shift || capsLock || shouldCapitalizeNext()) {
             letter.uppercase()
         } else {
             letter
