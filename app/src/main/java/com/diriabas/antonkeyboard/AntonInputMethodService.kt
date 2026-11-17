@@ -8,9 +8,11 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
+import android.view.WindowInsets
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -120,6 +122,19 @@ class AntonInputMethodService : InputMethodService() {
             setPadding(dp(5), dp(5), dp(5), dp(28))
             setBackgroundColor(backgroundColor)
         }
+
+        // Keep the keyboard above Android's navigation bar / gesture area.
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            val navigationBarBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            view.setPadding(dp(5), dp(5), dp(5), dp(28) + navigationBarBottom)
+            insets
+        }
+        root.requestApplyInsets()
 
         keyboardRoot = root
         renderKeyboard(root)
