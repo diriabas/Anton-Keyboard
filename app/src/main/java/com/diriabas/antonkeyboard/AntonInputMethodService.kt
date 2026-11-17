@@ -8,6 +8,9 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
+import android.view.MotionEvent
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -364,8 +367,14 @@ class AntonInputMethodService : InputMethodService() {
             }
 
             if (index == 2) {
-                addKey(row, "⌫", 1.3f, violetColor) {
-                    currentInputConnection?.deleteSurroundingText(1, 0)
+                addKey(
+                    row,
+                    "⌫",
+                    1.3f,
+                    violetColor,
+                    repeatAction = { deleteBeforeCursor() }
+                ) {
+                    deleteBeforeCursor()
                     refresh()
                 }
             }
@@ -483,6 +492,16 @@ class AntonInputMethodService : InputMethodService() {
         connection.commitText(suggestion, 1)
     }
 
+    private fun deleteBeforeCursor() {
+        val connection = currentInputConnection ?: return
+        val selected = connection.getSelectedText(0)
+        if (!selected.isNullOrEmpty()) {
+            connection.commitText("", 1)
+        } else {
+            connection.deleteSurroundingText(1, 0)
+        }
+    }
+
     private fun commitSpaceWithCorrection() {
         val connection = currentInputConnection ?: return
         val before = connection.getTextBeforeCursor(2, 0)?.toString().orEmpty()
@@ -597,8 +616,15 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(row, "⌫", 1f, violetColor) {
-            currentInputConnection?.deleteSurroundingText(1, 0)
+        addKey(
+            row,
+            "⌫",
+            1f,
+            violetColor,
+            repeatAction = { deleteBeforeCursor() }
+        ) {
+            deleteBeforeCursor()
+            refresh()
         }
 
         root.addView(row)
@@ -815,11 +841,12 @@ class AntonInputMethodService : InputMethodService() {
         weight: Float,
         color: Int = keyColor,
         keyHeight: Int = 42,
+        repeatAction: (() -> Unit)? = null,
         action: () -> Unit
     ) {
         val button = Button(this).apply {
             text = label
-            textSize = if (label.isEmpty()) 14f else 14f
+            textSize = 14f
             isAllCaps = false
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
@@ -828,7 +855,41 @@ class AntonInputMethodService : InputMethodService() {
             minHeight = 0
             minimumHeight = 0
             setPadding(dp(2), 0, dp(2), 0)
-            setOnClickListener { action() }
+
+            if (repeatAction == null) {
+                setOnClickListener { action() }
+            } else {
+                val handler = Handler(Looper.getMainLooper())
+                var repeating = false
+                val repeatTask = object : Runnable {
+                    override fun run() {
+                        repeating = true
+                        repeatAction()
+                        handler.postDelayed(this, 55L)
+                    }
+                }
+
+                setOnTouchListener { _, event ->
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            repeating = false
+                            handler.postDelayed(repeatTask, 350L)
+                            true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            handler.removeCallbacks(repeatTask)
+                            if (!repeating) action()
+                            true
+                        }
+                        MotionEvent.ACTION_CANCEL,
+                        MotionEvent.ACTION_OUTSIDE -> {
+                            handler.removeCallbacks(repeatTask)
+                            true
+                        }
+                        else -> true
+                    }
+                }
+            }
         }
 
         val params = LinearLayout.LayoutParams(
