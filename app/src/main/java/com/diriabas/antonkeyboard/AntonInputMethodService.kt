@@ -46,7 +46,6 @@ class AntonInputMethodService : InputMethodService() {
     private var keyboardRoot: LinearLayout? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var isVoiceListening = false
-    private var microphoneTestMode = false
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
@@ -399,15 +398,8 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(
-            toolbar,
-            if (microphoneTestMode) "✓" else "🎙",
-            0.9f,
-            if (microphoneTestMode) Color.rgb(40, 180, 90) else violetColor,
-            keyHeight = 30
-        ) {
-            microphoneTestMode = !microphoneTestMode
-            refresh()
+        addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 30) {
+            startVoiceInput()
         }
 
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 30) {
@@ -814,22 +806,40 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "Разреши доступ к микрофону в настройках Anton Keyboard", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Нет разрешения на микрофон. Открой настройки Anton Keyboard и разреши микрофон.", Toast.LENGTH_LONG).show()
             try {
                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                Toast.makeText(this, "Не удалось открыть настройки: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            }
             return
         }
 
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(this, "Не найдена служба распознавания речи. Проверь голосовой ввод в настройках устройства.", Toast.LENGTH_LONG).show()
+        val available = try {
+            SpeechRecognizer.isRecognitionAvailable(this)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Ошибка проверки распознавания: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        if (!available) {
+            Toast.makeText(this, "Android не обнаружил службу распознавания речи. Проверь приложение голосового ввода в настройках устройства.", Toast.LENGTH_LONG).show()
             return
         }
 
         try {
+            Toast.makeText(this, "Служба найдена. Создаю распознаватель…", Toast.LENGTH_SHORT).show()
+            speechRecognizer?.cancel()
             speechRecognizer?.destroy()
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+
+            val recognizer = speechRecognizer
+            if (recognizer == null) {
+                Toast.makeText(this, "Не удалось создать распознаватель речи", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     isVoiceListening = true
                     Toast.makeText(this@AntonInputMethodService, "Говори…", Toast.LENGTH_SHORT).show()
@@ -841,11 +851,15 @@ class AntonInputMethodService : InputMethodService() {
                 override fun onError(error: Int) {
                     isVoiceListening = false
                     val message = when (error) {
+                        SpeechRecognizer.ERROR_AUDIO -> "Ошибка аудиозаписи (ERROR_AUDIO)"
+                        SpeechRecognizer.ERROR_CLIENT -> "Ошибка клиента распознавания (ERROR_CLIENT)"
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Нет доступа к микрофону"
                         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Проверь подключение к интернету"
                         SpeechRecognizer.ERROR_NO_MATCH -> "Речь не распознана. Попробуй ещё раз"
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Служба распознавания занята. Повтори попытку"
+                        SpeechRecognizer.ERROR_SERVER -> "Ошибка сервера распознавания"
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Не удалось услышать речь"
-                        else -> "Ошибка распознавания речи ($error)"
+                        else -> "Ошибка распознавания речи (код $error)"
                     }
                     Toast.makeText(this@AntonInputMethodService, message, Toast.LENGTH_LONG).show()
                 }
@@ -870,13 +884,15 @@ class AntonInputMethodService : InputMethodService() {
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             }
+
             isVoiceListening = true
-            speechRecognizer?.startListening(intent)
-        } catch (_: Exception) {
+            recognizer.startListening(intent)
+            Toast.makeText(this, "Команда распознавания отправлена", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
             isVoiceListening = false
             speechRecognizer?.destroy()
             speechRecognizer = null
-            Toast.makeText(this, "Не удалось запустить голосовой ввод на этом устройстве", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Сбой запуска: ${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -922,7 +938,7 @@ class AntonInputMethodService : InputMethodService() {
             Triple("Тёмно-серая", "dark_gray", Color.rgb(47, 52, 61)),
             Triple("Синяя", "blue", Color.rgb(20, 62, 112)),
             Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
-            Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 221)),
+            Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
             Triple("Стеклянная", "glass", Color.rgb(95, 130, 170)),
         )
         var themeRow: LinearLayout? = null
