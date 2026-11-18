@@ -46,6 +46,7 @@ class AntonInputMethodService : InputMethodService() {
     private var keyboardRoot: LinearLayout? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var isVoiceListening = false
+    private var microphoneDiagnosticPressed = false
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
@@ -398,7 +399,16 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 30) {
+        addKey(
+            toolbar,
+            if (microphoneDiagnosticPressed) "✓" else "🎙",
+            0.9f,
+            if (microphoneDiagnosticPressed) Color.rgb(46, 180, 90) else violetColor,
+            keyHeight = 30
+        ) {
+            microphoneDiagnosticPressed = true
+            refresh()
+            Toast.makeText(this, "Кнопка микрофона нажата. Проверяю запуск…", Toast.LENGTH_LONG).show()
             startVoiceInput()
         }
 
