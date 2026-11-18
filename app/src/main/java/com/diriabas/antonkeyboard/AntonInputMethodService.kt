@@ -20,6 +20,7 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -118,7 +119,6 @@ class AntonInputMethodService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
-        activeInstance = this
         loadClipboardHistory()
         loadKeyboardSettings()
         loadPersonalWords()
