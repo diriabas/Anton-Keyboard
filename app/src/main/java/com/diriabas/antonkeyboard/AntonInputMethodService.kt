@@ -1,3 +1,4 @@
+
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
@@ -45,6 +46,7 @@ class AntonInputMethodService : InputMethodService() {
     private var keyboardRoot: LinearLayout? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var isVoiceListening = false
+    private var microphoneTestMode = false
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
@@ -397,10 +399,15 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        // Diagnostic message confirms that the microphone button was pressed.
-        addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 30) {
-            Toast.makeText(this, "МИКРОФОН НАЖАТ", Toast.LENGTH_LONG).show()
-            startVoiceInput()
+        addKey(
+            toolbar,
+            if (microphoneTestMode) "✓" else "🎙",
+            0.9f,
+            if (microphoneTestMode) Color.rgb(40, 180, 90) else violetColor,
+            keyHeight = 30
+        ) {
+            microphoneTestMode = !microphoneTestMode
+            refresh()
         }
 
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 30) {
@@ -915,7 +922,7 @@ class AntonInputMethodService : InputMethodService() {
             Triple("Тёмно-серая", "dark_gray", Color.rgb(47, 52, 61)),
             Triple("Синяя", "blue", Color.rgb(20, 62, 112)),
             Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
-            Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
+            Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 221)),
             Triple("Стеклянная", "glass", Color.rgb(95, 130, 170)),
         )
         var themeRow: LinearLayout? = null
