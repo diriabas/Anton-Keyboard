@@ -20,7 +20,6 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
 import android.view.View
-import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -42,7 +41,6 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
-    private var microphoneDiagnosticStatus = "🎙"
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
@@ -394,17 +392,6 @@ class AntonInputMethodService : InputMethodService() {
             isSettings = false
             isSymbols = false
             refresh()
-        }
-
-        addKey(
-            toolbar,
-            microphoneDiagnosticStatus,
-            0.9f,
-            if (microphoneDiagnosticStatus == "🎙") violetColor else Color.rgb(46, 180, 90),
-            keyHeight = 30
-        ) {
-            setMicrophoneDiagnosticStatus("1")
-            startVoiceInput()
         }
 
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 30) {
@@ -800,66 +787,6 @@ class AntonInputMethodService : InputMethodService() {
             if (cleared) "История и системный буфер очищены" else "История очищена; системный буфер недоступен",
             Toast.LENGTH_LONG
         ).show()
-    }
-
-    private fun setMicrophoneDiagnosticStatus(status: String) {
-        microphoneDiagnosticStatus = status
-        refresh()
-    }
-
-    private fun startVoiceInput() {
-        // Gboard's dictation is internal to Gboard. Open Android's IME picker
-        // so the user can switch to Gboard, dictate, then switch back to Anton Keyboard.
-        setMicrophoneDiagnosticStatus("🎙")
-
-        try {
-            val inputMethodManager =
-                getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            inputMethodManager.showInputMethodPicker()
-
-            Toast.makeText(
-                this,
-                "Выбери Gboard, затем нажми микрофон на Gboard. После диктовки вернись на Anton Keyboard.",
-                Toast.LENGTH_LONG
-            ).show()
-        } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "Не удалось открыть выбор клавиатуры: ${e.javaClass.simpleName}",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    private fun receiveVoiceResult(text: String?) {
-        if (!text.isNullOrBlank()) {
-            currentInputConnection?.commitText(text.trim(), 1)
-            setMicrophoneDiagnosticStatus("OK")
-        } else {
-            setMicrophoneDiagnosticStatus("C")
-            Toast.makeText(this, "Голосовой ввод отменён или речь не распознана", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun setVoiceActivityStatus(status: String) {
-        setMicrophoneDiagnosticStatus(status)
-    }
-
-    override fun onDestroy() {
-        if (activeInstance === this) activeInstance = null
-        super.onDestroy()
-    }
-
-    companion object {
-        @Volatile private var activeInstance: AntonInputMethodService? = null
-
-        @JvmStatic fun deliverVoiceResult(text: String?) {
-            activeInstance?.receiveVoiceResult(text)
-        }
-
-        @JvmStatic fun updateVoiceStatus(status: String) {
-            activeInstance?.setVoiceActivityStatus(status)
-        }
     }
 
     private fun showSettings() {
