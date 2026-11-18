@@ -20,6 +20,7 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -807,28 +808,26 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun startVoiceInput() {
-        setMicrophoneDiagnosticStatus("1")
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            setMicrophoneDiagnosticStatus("P!")
-            Toast.makeText(this, "Нет разрешения на микрофон. Разреши доступ для Anton Keyboard в настройках Android.", Toast.LENGTH_LONG).show()
-            try {
-                startActivity(Intent(this, VoiceRecognitionActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .putExtra(VoiceRecognitionActivity.EXTRA_LANGUAGE, if (isRussian) "ru-RU" else "en-US"))
-            } catch (e: Exception) {
-                setMicrophoneDiagnosticStatus("X")
-                Toast.makeText(this, "Не удалось открыть голосовой ввод: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-            }
-            return
-        }
-        setMicrophoneDiagnosticStatus("2")
+        // Gboard's dictation is internal to Gboard. Open Android's IME picker
+        // so the user can switch to Gboard, dictate, then switch back to Anton Keyboard.
+        setMicrophoneDiagnosticStatus("🎙")
+
         try {
-            startActivity(Intent(this, VoiceRecognitionActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(VoiceRecognitionActivity.EXTRA_LANGUAGE, if (isRussian) "ru-RU" else "en-US"))
+            val inputMethodManager =
+                getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            inputMethodManager.showInputMethodPicker()
+
+            Toast.makeText(
+                this,
+                "Выбери Gboard, затем нажми микрофон на Gboard. После диктовки вернись на Anton Keyboard.",
+                Toast.LENGTH_LONG
+            ).show()
         } catch (e: Exception) {
-            setMicrophoneDiagnosticStatus("X")
-            Toast.makeText(this, "Не удалось открыть системный голосовой ввод: ${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                this,
+                "Не удалось открыть выбор клавиатуры: ${e.javaClass.simpleName}",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
