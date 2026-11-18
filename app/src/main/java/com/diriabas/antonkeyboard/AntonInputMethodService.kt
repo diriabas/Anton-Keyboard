@@ -6,9 +6,6 @@ import android.Manifest
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.os.Bundle
 import android.content.ClipboardManager
 import android.content.Context
@@ -44,8 +41,6 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
-    private var speechRecognizer: SpeechRecognizer? = null
-    private var isVoiceListening = false
     private var microphoneDiagnosticStatus = "🎙"
 
     private val clipboardHistory = mutableListOf<String>()
@@ -124,6 +119,7 @@ class AntonInputMethodService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         loadClipboardHistory()
         loadKeyboardSettings()
         loadPersonalWords()
@@ -811,121 +807,60 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun startVoiceInput() {
-        if (isVoiceListening) {
-            speechRecognizer?.cancel()
-            isVoiceListening = false
-            Toast.makeText(this, "Голосовой ввод остановлен", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        setMicrophoneDiagnosticStatus("2")
+        setMicrophoneDiagnosticStatus("1")
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             setMicrophoneDiagnosticStatus("P!")
-            Toast.makeText(this, "Нет разрешения на микрофон. Открой настройки Anton Keyboard и разреши микрофон.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Нет разрешения на микрофон. Разреши доступ для Anton Keyboard в настройках Android.", Toast.LENGTH_LONG).show()
             try {
-                startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                startActivity(Intent(this, VoiceRecognitionActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(VoiceRecognitionActivity.EXTRA_LANGUAGE, if (isRussian) "ru-RU" else "en-US"))
             } catch (e: Exception) {
-                Toast.makeText(this, "Не удалось открыть настройки: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                setMicrophoneDiagnosticStatus("X")
+                Toast.makeText(this, "Не удалось открыть голосовой ввод: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
             }
             return
         }
-
-        setMicrophoneDiagnosticStatus("3")
-        val available = try {
-            SpeechRecognizer.isRecognitionAvailable(this)
-        } catch (e: Exception) {
-            setMicrophoneDiagnosticStatus("3!")
-            Toast.makeText(this, "Ошибка проверки распознавания: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
-            return
-        }
-
-        if (!available) {
-            setMicrophoneDiagnosticStatus("3!")
-            Toast.makeText(this, "Android не обнаружил службу распознавания речи. Проверь приложение голосового ввода в настройках устройства.", Toast.LENGTH_LONG).show()
-            return
-        }
-
+        setMicrophoneDiagnosticStatus("2")
         try {
-            setMicrophoneDiagnosticStatus("4")
-            Toast.makeText(this, "Служба найдена. Создаю распознаватель…", Toast.LENGTH_SHORT).show()
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-
-            val recognizer = speechRecognizer
-            if (recognizer == null) {
-                setMicrophoneDiagnosticStatus("4!")
-                Toast.makeText(this, "Не удалось создать распознаватель речи", Toast.LENGTH_LONG).show()
-                return
-            }
-
-            recognizer.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    isVoiceListening = true
-                    setMicrophoneDiagnosticStatus("OK")
-                    Toast.makeText(this@AntonInputMethodService, "Говори…", Toast.LENGTH_SHORT).show()
-                }
-                override fun onBeginningOfSpeech() = Unit
-                override fun onRmsChanged(rmsdB: Float) = Unit
-                override fun onBufferReceived(buffer: ByteArray?) = Unit
-                override fun onEndOfSpeech() { isVoiceListening = false }
-                override fun onError(error: Int) {
-                    isVoiceListening = false
-                    setMicrophoneDiagnosticStatus("E$error")
-                    val message = when (error) {
-                        SpeechRecognizer.ERROR_AUDIO -> "Ошибка аудиозаписи (ERROR_AUDIO)"
-                        SpeechRecognizer.ERROR_CLIENT -> "Ошибка клиента распознавания (ERROR_CLIENT)"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Нет доступа к микрофону"
-                        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Проверь подключение к интернету"
-                        SpeechRecognizer.ERROR_NO_MATCH -> "Речь не распознана. Попробуй ещё раз"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Служба распознавания занята. Повтори попытку"
-                        SpeechRecognizer.ERROR_SERVER -> "Ошибка сервера распознавания"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Не удалось услышать речь"
-                        else -> "Ошибка распознавания речи (код $error)"
-                    }
-                    Toast.makeText(this@AntonInputMethodService, message, Toast.LENGTH_LONG).show()
-                }
-                override fun onResults(results: Bundle?) {
-                    isVoiceListening = false
-                    val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
-                    if (!spoken.isNullOrEmpty()) {
-                        currentInputConnection?.commitText(spoken, 1)
-                    } else {
-                        Toast.makeText(this@AntonInputMethodService, "Речь не распознана", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                override fun onPartialResults(partialResults: Bundle?) = Unit
-                override fun onEvent(eventType: Int, params: Bundle?) = Unit
-            })
-
-            val language = if (isRussian) "ru-RU" else "en-US"
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            }
-
-            setMicrophoneDiagnosticStatus("5")
-            isVoiceListening = true
-            recognizer.startListening(intent)
-            Toast.makeText(this, "Команда распознавания отправлена", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, VoiceRecognitionActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(VoiceRecognitionActivity.EXTRA_LANGUAGE, if (isRussian) "ru-RU" else "en-US"))
         } catch (e: Exception) {
             setMicrophoneDiagnosticStatus("X")
-            isVoiceListening = false
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-            Toast.makeText(this, "Сбой запуска: ${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Не удалось открыть системный голосовой ввод: ${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}", Toast.LENGTH_LONG).show()
         }
     }
 
+    private fun receiveVoiceResult(text: String?) {
+        if (!text.isNullOrBlank()) {
+            currentInputConnection?.commitText(text.trim(), 1)
+            setMicrophoneDiagnosticStatus("OK")
+        } else {
+            setMicrophoneDiagnosticStatus("C")
+            Toast.makeText(this, "Голосовой ввод отменён или речь не распознана", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setVoiceActivityStatus(status: String) {
+        setMicrophoneDiagnosticStatus(status)
+    }
+
     override fun onDestroy() {
-        isVoiceListening = false
-        speechRecognizer?.cancel()
-        speechRecognizer?.destroy()
-        speechRecognizer = null
+        if (activeInstance === this) activeInstance = null
         super.onDestroy()
+    }
+
+    companion object {
+        @Volatile private var activeInstance: AntonInputMethodService? = null
+
+        @JvmStatic fun deliverVoiceResult(text: String?) {
+            activeInstance?.receiveVoiceResult(text)
+        }
+
+        @JvmStatic fun updateVoiceStatus(status: String) {
+            activeInstance?.setVoiceActivityStatus(status)
+        }
     }
 
     private fun showSettings() {
