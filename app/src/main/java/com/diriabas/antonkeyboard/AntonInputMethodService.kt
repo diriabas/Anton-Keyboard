@@ -1,4 +1,3 @@
-
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
@@ -19,6 +18,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -42,6 +42,7 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
+    private var suggestionsRow: LinearLayout? = null
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
@@ -367,6 +368,7 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun renderKeyboard(root: LinearLayout) {
         root.removeAllViews()
+        suggestionsRow = null
 
         // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
@@ -471,6 +473,7 @@ class AntonInputMethodService : InputMethodService() {
                     if (shift && !capsLock) {
                         shift = false
                     }
+                    updateSuggestions()
                 }
             }
 
@@ -480,10 +483,10 @@ class AntonInputMethodService : InputMethodService() {
                     "⌫",
                     1.3f,
                     violetColor,
-                    repeatAction = { deleteBeforeCursor() }
+                    repeatAction = { deleteBeforeCursor(); updateSuggestions() }
                 ) {
                     deleteBeforeCursor()
-                    refresh()
+                    updateSuggestions()
                 }
             }
 
@@ -528,13 +531,40 @@ class AntonInputMethodService : InputMethodService() {
         if (suggestions.isEmpty()) return
 
         val row = newRow()
+        suggestionsRow = row
         suggestions.forEach { suggestion ->
             addKey(row, suggestion, 1f, keyColor) {
                 replaceCurrentWord(suggestion)
-                refresh()
+                updateSuggestions()
             }
         }
         root.addView(row)
+    }
+
+    // Update only the suggestion strip; rebuilding the full keyboard on every
+    // keystroke can cause visible input lag on some devices.
+    private fun updateSuggestions() {
+        val root = keyboardRoot ?: return
+        if (isSymbols || isEmoji || isAI || isSettings) return
+
+        suggestionsRow?.let { oldRow ->
+            root.removeView(oldRow)
+            suggestionsRow = null
+        }
+
+        val word = getCurrentWord()
+        val suggestions = getSuggestions(word)
+        if (suggestions.isEmpty()) return
+
+        val row = newRow()
+        suggestionsRow = row
+        suggestions.forEach { suggestion ->
+            addKey(row, suggestion, 1f, keyColor) {
+                replaceCurrentWord(suggestion)
+                updateSuggestions()
+            }
+        }
+        root.addView(row, minOf(1, root.childCount))
     }
 
     private fun getCurrentWord(): String {
@@ -1003,8 +1033,15 @@ class AntonInputMethodService : InputMethodService() {
             setPadding(dp(2), 0, dp(2), 0)
 
             if (repeatAction == null) {
+                setOnTouchListener { view, event ->
+                    if (event.action == MotionEvent.ACTION_DOWN) {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    }
+                    false
+                }
                 setOnClickListener { action() }
             } else {
+                val hapticView = this
                 val handler = Handler(Looper.getMainLooper())
                 var repeating = false
                 val repeatTask = object : Runnable {
@@ -1019,6 +1056,7 @@ class AntonInputMethodService : InputMethodService() {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
                             repeating = false
+                            hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             handler.postDelayed(repeatTask, 350L)
                             true
                         }
