@@ -1,4 +1,3 @@
-
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
@@ -398,7 +397,9 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
+        // Diagnostic message confirms that the microphone button was pressed.
         addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 30) {
+            Toast.makeText(this, "МИКРОФОН НАЖАТ", Toast.LENGTH_LONG).show()
             startVoiceInput()
         }
 
