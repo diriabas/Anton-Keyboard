@@ -57,6 +57,7 @@ class AntonInputMethodService : InputMethodService() {
     private val maxClipboardItems = 20
 
     private val personalWords = mutableListOf<String>()
+    private val maxSuggestions = 5
 
     private var autoCorrectionEnabled = true
     private var autoPunctuationSpaceEnabled = true
@@ -83,6 +84,8 @@ class AntonInputMethodService : InputMethodService() {
 
     private val russianWords = listOf(
         "привет", "приветик", "приветствую",
+        "привычка", "привычный", "привести", "приведу",
+        "приводить", "привлекательный",
         "пожалуйста", "пожалуй", "пожаловаться",
         "спасибо", "спасибо большое",
         "здравствуйте", "добро", "добрый", "доброе",
@@ -101,7 +104,15 @@ class AntonInputMethodService : InputMethodService() {
         "конечно", "точно", "сейчас",
         "клавиатура", "телефон", "компьютер",
         "интересно", "понятно", "правильно",
-        "извини", "извините", "поздравляю"
+        "извини", "извините", "поздравляю",
+        "возможно", "вместе", "вопрос", "время",
+        "всегда", "говорить", "говорю", "делать",
+        "думаю", "кажется", "который", "красиво",
+        "лучше", "молодец", "наверное", "например",
+        "нравится", "обязательно", "отправить",
+        "получилось", "посмотреть", "проверить",
+        "разговор", "сообщение", "сегодняшний",
+        "сделать", "спокойно", "хотеть", "хорошего"
     )
 
     private val englishWords = listOf(
@@ -126,7 +137,15 @@ class AntonInputMethodService : InputMethodService() {
         "beautiful", "because",
         "before", "between", "better",
         "interesting", "important",
-        "understand", "unfortunately"
+        "understand", "unfortunately",
+        "anything", "anyone", "another", "around",
+        "always", "already", "beautifully", "believe",
+        "between", "business", "certain", "change",
+        "different", "everything", "example", "family",
+        "favorite", "following", "friendship", "getting",
+        "happened", "however", "language", "learning",
+        "message", "nothing", "people", "probably",
+        "something", "sometimes", "together", "without"
     )
 
     override fun onCreate() {
@@ -495,6 +514,7 @@ class AntonInputMethodService : InputMethodService() {
             isEmoji = false
             isAI = false
             isSettings = false
+            isSymbols = false
             showClipboard()
         }
 
@@ -785,7 +805,12 @@ class AntonInputMethodService : InputMethodService() {
                     keyHeight = 38
                 ) {
                     currentInputConnection?.commitText(number, 1)
-                    updateSuggestions()
+                    if (isSymbols) {
+                        isSymbols = false
+                        refresh()
+                    } else {
+                        updateSuggestions()
+                    }
                 }
             }
 
@@ -845,7 +870,12 @@ class AntonInputMethodService : InputMethodService() {
                         shift = false
                     }
 
-                    updateSuggestions()
+                    if (isSymbols) {
+                        isSymbols = false
+                        refresh()
+                    } else {
+                        updateSuggestions()
+                    }
                 }
             }
 
@@ -974,49 +1004,88 @@ class AntonInputMethodService : InputMethodService() {
         if (word.isBlank()) return emptyList()
 
         val normalized = word.lowercase(Locale.ROOT)
-
-        val dictionary = if (isRussian) {
-            russianWords
-        } else {
-            englishWords
-        }
-
+        val dictionary = if (isRussian) russianWords else englishWords
         val results = mutableListOf<String>()
 
+        fun addCandidate(candidate: String) {
+            if (candidate.isBlank() ||
+                candidate.equals(normalized, ignoreCase = true) ||
+                results.any { it.equals(candidate, ignoreCase = true) }
+            ) return
+            results.add(candidate)
+        }
+
+        // Личные слова имеют приоритет и никогда не исправляются автоматически.
         personalWords
             .filter {
                 it.lowercase(Locale.ROOT).startsWith(normalized) &&
                     !it.equals(normalized, ignoreCase = true)
             }
-            .forEach {
-                if (it !in results) results.add(it)
-            }
+            .forEach(::addCandidate)
 
-        if (autoCorrectionEnabled) {
-            corrections[normalized]?.let {
-                results.add(it)
-            }
-        }
+        // Точные известные опечатки показываются как предложение.
+        corrections[normalized]?.let(::addCandidate)
 
+        // Сначала наиболее естественные продолжения введённого префикса.
         dictionary
             .filter {
                 it.startsWith(normalized) &&
                     !it.equals(normalized, ignoreCase = true)
             }
-            .sortedBy { it.length }
-            .forEach {
-                if (it !in results) results.add(it)
-            }
+            .sortedWith(compareBy<String> { it.length }.thenBy { it })
+            .forEach(::addCandidate)
 
-        return results.take(3).map { suggestion ->
-            if (word.firstOrNull()?.isUpperCase() == true) {
-                suggestion.replaceFirstChar {
-                    it.uppercase()
+        // Мягкий поиск опечаток: только одна ошибка для слов от 4 букв.
+        // Это даёт варианты, но само по себе не заменяет введённое слово.
+        if (normalized.length >= 4 && results.size < maxSuggestions) {
+            dictionary
+                .asSequence()
+                .filter { candidate ->
+                    candidate.length >= 4 &&
+                        editDistanceAtMostOne(normalized, candidate) &&
+                        !candidate.equals(normalized, ignoreCase = true)
                 }
+                .sortedBy { it.length }
+                .forEach(::addCandidate)
+        }
+
+        return results.take(maxSuggestions).map { suggestion ->
+            if (word.firstOrNull()?.isUpperCase() == true) {
+                suggestion.replaceFirstChar { it.uppercase() }
             } else {
                 suggestion
             }
         }
+    }
+
+    private fun editDistanceAtMostOne(first: String, second: String): Boolean {
+        if (kotlin.math.abs(first.length - second.length) > 1) return false
+
+        var i = 0
+        var j = 0
+        var differences = 0
+
+        while (i < first.length && j < second.length) {
+            if (first[i] == second[j]) {
+                i++
+                j++
+            } else {
+                differences++
+                if (differences > 1) return false
+
+                when {
+                    first.length > second.length -> i++
+                    second.length > first.length -> j++
+                    else -> {
+                        i++
+                        j++
+                    }
+                }
+            }
+        }
+
+        if (i < first.length || j < second.length) differences++
+        return differences <= 1
     }
 
     private fun replaceCurrentWord(suggestion: String) {
@@ -1069,9 +1138,14 @@ class AntonInputMethodService : InputMethodService() {
 
         val word = getCurrentWord()
 
-        if (autoCorrectionEnabled && word.isNotEmpty()) {
-            val corrected =
-                corrections[word.lowercase(Locale.ROOT)]
+        if (
+            autoCorrectionEnabled &&
+            word.isNotEmpty() &&
+            personalWords.none { it.equals(word, ignoreCase = true) }
+        ) {
+            // Автозамена только для точных, заранее известных опечаток.
+            // Не применяем fuzzy-замену автоматически, чтобы не портить имена.
+            val corrected = corrections[word.lowercase(Locale.ROOT)]
 
             if (corrected != null) {
                 val result = if (word.first().isUpperCase()) {
@@ -1165,6 +1239,11 @@ class AntonInputMethodService : InputMethodService() {
             keys.forEach { emoji ->
                 addKey(row, emoji, 1f) {
                     currentInputConnection?.commitText(emoji, 1)
+                    isEmoji = false
+                    isSymbols = false
+                    isAI = false
+                    isSettings = false
+                    refresh()
                 }
             }
 
@@ -1222,6 +1301,9 @@ class AntonInputMethodService : InputMethodService() {
             keyHeight = 34
         ) {
             isSettings = false
+            isEmoji = false
+            isAI = false
+            isSymbols = false
             refresh()
         }
 
@@ -1257,6 +1339,11 @@ class AntonInputMethodService : InputMethodService() {
                 false
             ) {
                 currentInputConnection?.commitText(item, 1)
+                isEmoji = false
+                isAI = false
+                isSettings = false
+                isSymbols = false
+                refresh()
 
                 Toast.makeText(
                     this,
@@ -1298,7 +1385,11 @@ class AntonInputMethodService : InputMethodService() {
             cleared = false
         }
 
-        showClipboard()
+        isEmoji = false
+        isAI = false
+        isSettings = false
+        isSymbols = false
+        refresh()
 
         Toast.makeText(
             this,
@@ -1435,6 +1526,35 @@ class AntonInputMethodService : InputMethodService() {
 
         // Раздел личного словаря скрыт.
         // Сохранённые слова продолжают участвовать в подсказках.
+
+        content.addView(createLabel("О ПРИЛОЖЕНИИ"))
+        content.addView(
+            TextView(this).apply {
+                val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    packageManager.getPackageInfo(
+                        packageName,
+                        android.content.pm.PackageManager.PackageInfoFlags.of(0)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(packageName, 0)
+                }
+
+                val versionName = packageInfo.versionName ?: "неизвестно"
+                val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    packageInfo.longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageInfo.versionCode.toLong()
+                }
+
+                text = "Anton Keyboard  $versionName  ·  Build $versionCode"
+                textSize = 11f
+                setTextColor(textColorForTheme())
+                gravity = Gravity.CENTER
+                setPadding(dp(6), dp(4), dp(6), dp(8))
+            }
+        )
 
         scroll.addView(content)
 
@@ -1645,6 +1765,11 @@ class AntonInputMethodService : InputMethodService() {
                     "Эта функция появится в следующем обновлении",
                     Toast.LENGTH_SHORT
                 ).show()
+                isAI = false
+                isEmoji = false
+                isSettings = false
+                isSymbols = false
+                refresh()
             }
 
             root.addView(row)
