@@ -479,6 +479,12 @@ class AntonInputMethodService : InputMethodService() {
             addChristmasDecoration(root)
         }
 
+        // Keep word suggestions above the shortcut toolbar (emoji, clipboard,
+        // AI, language and settings). Do not show them in other modes.
+        if (!isSettings && !isAI && !isEmoji && !isSymbols) {
+            showSuggestions(root)
+        }
+
         // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
 
@@ -645,10 +651,6 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun showLetters(root: LinearLayout) {
-        if (!isSymbols) {
-            showSuggestions(root)
-        }
-
         val rows = when {
             isSymbols -> listOf(
                 listOf("1","2","3","4","5","6","7","8","9","0"),
@@ -703,9 +705,11 @@ class AntonInputMethodService : InputMethodService() {
                     } else {
                         currentInputConnection?.commitText(displayLetter(key), 1)
                     }
-                    if (wasSymbols) isSymbols = false
+                    // Keep the symbols/numbers layout active after every key.
+                    // Otherwise the first digit switches back to letters and
+                    // multi-digit values (for example 100) cannot be entered.
 
-                    if (shift && !capsLock) {
+                    if (shift && !capsLock && !wasSymbols) {
                         shift = false
                     }
                     if (wasSymbols) refresh() else updateSuggestions()
@@ -783,7 +787,7 @@ class AntonInputMethodService : InputMethodService() {
                 updateSuggestions()
             }
         }
-        root.addView(row)
+        root.addView(row, 0)
     }
 
     // Update only the suggestion strip; rebuilding the full keyboard on every
@@ -825,7 +829,7 @@ class AntonInputMethodService : InputMethodService() {
                 updateSuggestions()
             }
         }
-        root.addView(row, minOf(1, root.childCount))
+        root.addView(row, 0)
     }
 
     private fun requestSystemSpellCheck(word: String) {
@@ -1286,7 +1290,7 @@ class AntonInputMethodService : InputMethodService() {
             elevation = dp(1).toFloat()
             setOnClickListener { action() }
         }
-        val params = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+        val params = LinearLayout.LayoutParams(0, dp(34), 1f).apply {
             setMargins(dp(2), dp(2), dp(2), dp(2))
         }
         row.addView(tile, params)
@@ -1307,7 +1311,7 @@ class AntonInputMethodService : InputMethodService() {
             setPadding(dp(2), dp(2), dp(2), dp(2))
             setOnClickListener { saveTheme(theme) }
         }
-        row.addView(tile, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+        row.addView(tile, LinearLayout.LayoutParams(0, dp(34), 1f).apply {
             setMargins(dp(2), dp(2), dp(2), dp(2))
         })
     }
@@ -1380,6 +1384,10 @@ class AntonInputMethodService : InputMethodService() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
     }
 
