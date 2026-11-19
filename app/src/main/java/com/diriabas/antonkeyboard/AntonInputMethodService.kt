@@ -805,12 +805,7 @@ class AntonInputMethodService : InputMethodService() {
                     keyHeight = 38
                 ) {
                     currentInputConnection?.commitText(number, 1)
-                    if (isSymbols) {
-                        isSymbols = false
-                        refresh()
-                    } else {
-                        updateSuggestions()
-                    }
+                    updateSuggestions()
                 }
             }
 
@@ -870,12 +865,9 @@ class AntonInputMethodService : InputMethodService() {
                         shift = false
                     }
 
-                    if (isSymbols) {
-                        isSymbols = false
-                        refresh()
-                    } else {
-                        updateSuggestions()
-                    }
+                    // Не выходим из символьной раскладки после каждой цифры/знака.
+                    // Пользователь сам возвращается к буквам кнопкой ABC.
+                    if (!isSymbols) updateSuggestions()
                 }
             }
 
