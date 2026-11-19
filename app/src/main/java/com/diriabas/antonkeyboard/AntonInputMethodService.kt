@@ -188,10 +188,6 @@ class AntonInputMethodService : InputMethodService() {
     private fun loadTheme() {
         val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
         selectedTheme = prefs.getString("keyboard_theme", "dark_gray") ?: "dark_gray"
-        if (selectedTheme == "winter") {
-            selectedTheme = "dark_gray"
-            prefs.edit().putString("keyboard_theme", selectedTheme).apply()
-        }
         glassTheme = selectedTheme == "glass"
         applyThemeColors()
     }
@@ -245,6 +241,12 @@ class AntonInputMethodService : InputMethodService() {
                 keyColor = Color.argb(155, 115, 150, 190)
                 accentColor = Color.argb(210, 205, 231, 255)
                 violetColor = Color.argb(185, 130, 155, 255)
+            }
+            "new_year" -> {
+                backgroundColor = Color.rgb(7, 19, 43)
+                keyColor = Color.rgb(22, 48, 79)
+                accentColor = Color.rgb(125, 218, 255)
+                violetColor = Color.rgb(183, 91, 190)
             }
         }
     }
@@ -375,6 +377,11 @@ class AntonInputMethodService : InputMethodService() {
         root.removeAllViews()
         suggestionsRow = null
 
+        // Festive decoration appears only in the New Year theme.
+        if (selectedTheme == "new_year") {
+            addChristmasDecoration(root)
+        }
+
         // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
 
@@ -426,6 +433,53 @@ class AntonInputMethodService : InputMethodService() {
             isEmoji -> showEmoji(root)
             else -> showLetters(root)
         }
+    }
+
+    private fun addChristmasDecoration(root: LinearLayout) {
+        val lights = TextView(this).apply {
+            text = "🔴  🟡  🟢  🔵  🟣  🔴  🟡  🟢  🔵"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(1), 0, dp(1))
+        }
+        root.addView(lights, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(16)
+        ))
+
+        val snowfall = TextView(this).apply {
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(205, 235, 255))
+            setPadding(0, 0, 0, 0)
+        }
+        root.addView(snowfall, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(17)
+        ))
+
+        val frames = listOf(
+            "❄       ·        ❅       ·        ❄",
+            "·     ❄        ·       ❅       ·",
+            "❅       ·        ❄       ·        ❅",
+            "·       ❅       ·        ❄       ·"
+        )
+        val handler = Handler(Looper.getMainLooper())
+        var frame = 0
+        val animation = object : Runnable {
+            override fun run() {
+                snowfall.text = frames[frame % frames.size]
+                frame++
+                if (snowfall.isAttachedToWindow) handler.postDelayed(this, 650L)
+            }
+        }
+        snowfall.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                handler.removeCallbacks(animation)
+                handler.post(animation)
+            }
+            override fun onViewDetachedFromWindow(view: View) {
+                handler.removeCallbacks(animation)
+            }
+        })
     }
 
     private fun showLetters(root: LinearLayout) {
@@ -882,6 +936,7 @@ class AntonInputMethodService : InputMethodService() {
             Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
             Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
             Triple("Стеклянная", "glass", Color.rgb(95, 130, 170)),
+            Triple("🎄 Новый год", "new_year", Color.rgb(17, 49, 82)),
         )
         var themeRow: LinearLayout? = null
         themes.forEachIndexed { index, theme ->
