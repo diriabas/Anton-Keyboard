@@ -479,7 +479,18 @@ class AntonInputMethodService : InputMethodService() {
             }
 
             keys.forEach { key ->
-                addKey(row, displayLetter(key), 1f) {
+                addKey(
+                    row,
+                    displayLetter(key),
+                    1f,
+                    longPressAction = {
+                        val secondary = secondarySymbol(key.lowercase(Locale.ROOT))
+                        if (secondary.isNotEmpty()) {
+                            currentInputConnection?.commitText(secondary, 1)
+                            updateSuggestions()
+                        }
+                    }
+                ) {
                     if (isSymbols && key in listOf(",", ".", "!", "?", ";", ":")) {
                         commitPunctuation(key)
                     } else {
@@ -852,7 +863,7 @@ class AntonInputMethodService : InputMethodService() {
         )
         var toggleRow: LinearLayout? = null
         toggles.forEachIndexed { index, item ->
-            if (index % 2 == 0) {
+            if (index % 3 == 0) {
                 toggleRow = newRow()
                 content.addView(toggleRow)
             }
@@ -874,40 +885,15 @@ class AntonInputMethodService : InputMethodService() {
         )
         var themeRow: LinearLayout? = null
         themes.forEachIndexed { index, theme ->
-            if (index % 2 == 0) {
+            if (index % 3 == 0) {
                 themeRow = newRow()
                 content.addView(themeRow)
             }
             addThemeTile(themeRow!!, theme.first, theme.second, theme.third)
         }
 
-        content.addView(createLabel("МОЙ СЛОВАРЬ"))
-        content.addView(createLabel("Добавь последнее набранное слово или нажми на слово, чтобы удалить его"))
-        val addRow = newRow()
-        addKey(addRow, "Добавить последнее слово", 1f, violetColor, keyHeight = 36) {
-            val before = currentInputConnection?.getTextBeforeCursor(80, 0)?.toString().orEmpty().trimEnd()
-            val word = Regex("[А-Яа-яЁёA-Za-z-]+$").find(before)?.value.orEmpty()
-            addPersonalWord(word)
-        }
-        content.addView(addRow)
-
-        if (personalWords.isEmpty()) {
-            content.addView(createLabel("Пока нет собственных слов"))
-        } else {
-            var wordsRow: LinearLayout? = null
-            personalWords.toList().forEachIndexed { index, word ->
-                if (index % 2 == 0) {
-                    wordsRow = newRow()
-                    content.addView(wordsRow)
-                }
-                addTile(wordsRow!!, word, "Удалить", false) {
-                    personalWords.remove(word)
-                    savePersonalWords()
-                    showSettings()
-                }
-            }
-        }
-
+        // Personal dictionary is intentionally hidden from Settings UI.
+        // Existing personal words remain available to word suggestions.
         scroll.addView(content)
         root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         val back = newRow()
@@ -921,19 +907,19 @@ class AntonInputMethodService : InputMethodService() {
     private fun addTile(row: LinearLayout, title: String, subtitle: String, selected: Boolean, action: () -> Unit) {
         val tile = Button(this).apply {
             text = "$title\n$subtitle"
-            textSize = 11f
+            textSize = 9f
             isAllCaps = false
             setTextColor(if (selected) Color.WHITE else textColorForTheme())
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
             minHeight = 0
             minimumHeight = 0
-            setPadding(dp(4), dp(5), dp(4), dp(5))
-            background = rounded(if (selected) violetColor else keyColor, 13)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            background = rounded(if (selected) violetColor else keyColor, 7)
             elevation = dp(1).toFloat()
             setOnClickListener { action() }
         }
-        val params = LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+        val params = LinearLayout.LayoutParams(dp(58), dp(58)).apply {
             setMargins(dp(3), dp(3), dp(3), dp(3))
         }
         row.addView(tile, params)
@@ -943,18 +929,18 @@ class AntonInputMethodService : InputMethodService() {
         val selected = selectedTheme == theme
         val tile = Button(this).apply {
             text = if (selected) "✓  $label" else label
-            textSize = 11f
+            textSize = 9f
             isAllCaps = false
             setTextColor(if (theme == "light_blue" || theme == "light_green" || theme == "gray") Color.rgb(25, 32, 42) else Color.WHITE)
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
             minHeight = 0
             minimumHeight = 0
-            background = rounded(if (theme == "glass") Color.argb(185, 95, 130, 170) else swatch, 13)
-            setPadding(dp(3), dp(4), dp(3), dp(4))
+            background = rounded(if (theme == "glass") Color.argb(185, 95, 130, 170) else swatch, 7)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
             setOnClickListener { saveTheme(theme) }
         }
-        row.addView(tile, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+        row.addView(tile, LinearLayout.LayoutParams(dp(58), dp(58)).apply {
             setMargins(dp(3), dp(3), dp(3), dp(3))
         })
     }
@@ -1032,6 +1018,7 @@ class AntonInputMethodService : InputMethodService() {
         color: Int = keyColor,
         keyHeight: Int = 49,
         repeatAction: (() -> Unit)? = null,
+        longPressAction: (() -> Unit)? = null,
         action: () -> Unit
     ) {
         val button = Button(this).apply {
@@ -1061,7 +1048,7 @@ class AntonInputMethodService : InputMethodService() {
             isSoundEffectsEnabled = false
             setPadding(dp(1), 0, dp(1), 0)
 
-            if (repeatAction == null) {
+            if (repeatAction == null && longPressAction == null) {
                 setOnTouchListener { view, event ->
                     if (event.action == MotionEvent.ACTION_DOWN) {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -1069,6 +1056,35 @@ class AntonInputMethodService : InputMethodService() {
                     false
                 }
                 setOnClickListener { action() }
+            } else if (repeatAction == null) {
+                val hapticView = this
+                val handler = Handler(Looper.getMainLooper())
+                var longPressed = false
+                val longPressTask = Runnable {
+                    longPressed = true
+                    hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    longPressAction?.invoke()
+                }
+                setOnTouchListener { _, event ->
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            longPressed = false
+                            hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            handler.postDelayed(longPressTask, 450L)
+                            true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            handler.removeCallbacks(longPressTask)
+                            if (!longPressed) action()
+                            true
+                        }
+                        MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
+                            handler.removeCallbacks(longPressTask)
+                            true
+                        }
+                        else -> true
+                    }
+                }
             } else {
                 val hapticView = this
                 val handler = Handler(Looper.getMainLooper())
