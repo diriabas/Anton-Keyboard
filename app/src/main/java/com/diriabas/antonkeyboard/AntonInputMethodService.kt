@@ -396,6 +396,32 @@ class AntonInputMethodService : InputMethodService() {
         showSettings()
     }
 
+    /**
+     * Learns a completed word that is not present in the active built-in dictionary.
+     * Learning happens only when the user finishes the word (space/punctuation/enter),
+     * never while the user is still typing it.
+     */
+    private fun rememberUnknownWord(word: String) {
+        val cleaned = word.trim()
+        if (cleaned.length < 2) return
+        if (!Regex("^[А-Яа-яЁёA-Za-z-]+$").matches(cleaned)) return
+        if (personalWords.any { it.equals(cleaned, ignoreCase = true) }) return
+
+        val normalized = cleaned.lowercase(Locale.ROOT)
+        val dictionary = if (isRussian) {
+            russianWords + extraRussianWords
+        } else {
+            englishWords + extraEnglishWords
+        }
+        if (dictionary.any { it.equals(normalized, ignoreCase = true) }) return
+
+        personalWords.add(0, cleaned)
+        if (personalWords.size > 1000) {
+            personalWords.subList(1000, personalWords.size).clear()
+        }
+        savePersonalWords()
+    }
+
     private fun loadClipboardHistory() {
         val prefs = getSharedPreferences(
             "anton_keyboard",
@@ -757,6 +783,7 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(bottom, "↵", 1.2f, violetColor) {
+            rememberUnknownWord(getCurrentWord())
             currentInputConnection?.commitText("\n", 1)
             refresh()
         }
@@ -1021,7 +1048,12 @@ class AntonInputMethodService : InputMethodService() {
 
                 connection.deleteSurroundingText(word.length, 0)
                 connection.commitText(result, 1)
+            } else {
+                rememberUnknownWord(word)
             }
+        } else if (word.isNotEmpty()) {
+            // Learn completed words even when autocorrection is disabled.
+            rememberUnknownWord(word)
         }
 
         connection.commitText(" ", 1)
@@ -1029,6 +1061,7 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun commitPunctuation(symbol: String) {
         val connection = currentInputConnection ?: return
+        rememberUnknownWord(getCurrentWord())
         val before = connection.getTextBeforeCursor(1, 0)?.toString().orEmpty()
 
         // Replace a space before punctuation and add exactly one space after it.
