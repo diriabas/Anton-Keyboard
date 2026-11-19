@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.content.ClipboardManager
 import android.content.Context
+import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -377,6 +378,33 @@ class AntonInputMethodService : InputMethodService() {
         getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
             .putString("personal_words", array.toString())
             .apply()
+    }
+
+    // Long-pressing a suggestion asks before removing it from the personal dictionary.
+    private fun confirmRemovePersonalWord(word: String) {
+        val savedWord = personalWords.firstOrNull {
+            it.equals(word.trim(), ignoreCase = true)
+        } ?: return
+
+        AlertDialog.Builder(this)
+            .setTitle("Удалить слово?")
+            .setMessage("Удалить «$savedWord» из личного словаря?")
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Удалить") { _, _ ->
+                val removed = personalWords.removeAll {
+                    it.equals(savedWord, ignoreCase = true)
+                }
+                if (removed) {
+                    savePersonalWords()
+                    Toast.makeText(
+                        this,
+                        "Слово «$savedWord» удалено",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    updateSuggestions()
+                }
+            }
+            .show()
     }
 
     private fun addPersonalWord(word: String) {
@@ -809,7 +837,14 @@ class AntonInputMethodService : InputMethodService() {
         val row = newRow()
         suggestionsRow = row
         suggestions.forEach { suggestion ->
-            addKey(row, suggestion, 1f, keyColor) {
+            addKey(
+                row, suggestion, 1f, keyColor,
+                longPressAction = {
+                    // Ask for confirmation before removing a learned word.
+                    confirmRemovePersonalWord(suggestion)
+                }
+            ) {
+                // A normal tap accepts the suggestion and keeps it in the personal dictionary.
                 replaceCurrentWord(suggestion)
                 updateSuggestions()
             }
@@ -849,7 +884,14 @@ class AntonInputMethodService : InputMethodService() {
         val row = newRow()
         suggestionsRow = row
         suggestions.forEach { suggestion ->
-            addKey(row, suggestion, 1f, keyColor) {
+            addKey(
+                row, suggestion, 1f, keyColor,
+                longPressAction = {
+                    // Ask for confirmation before removing a learned word.
+                    confirmRemovePersonalWord(suggestion)
+                }
+            ) {
+                // A normal tap accepts the suggestion and keeps it in the personal dictionary.
                 replaceCurrentWord(suggestion)
                 systemSuggestions = emptyList()
                 requestedSpellWord = ""
@@ -1269,59 +1311,6 @@ class AntonInputMethodService : InputMethodService() {
                 content.addView(themeRow)
             }
             addThemeTile(themeRow!!, theme.first, theme.second, theme.third)
-        }
-
-        // Personal dictionary: show learned/custom words with an individual delete control.
-        content.addView(createSettingsLabel("МОЙ СЛОВАРЬ  •  ${personalWords.size}"))
-
-        if (personalWords.isEmpty()) {
-            content.addView(createSettingsLabel("Сохранённых слов пока нет"))
-        } else {
-            personalWords.toList().forEach { savedWord ->
-                val wordRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(4), dp(1), dp(4), dp(1))
-                }
-
-                val wordLabel = TextView(this).apply {
-                    text = savedWord
-                    textSize = 12f
-                    setTextColor(textColorForTheme())
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(8), 0, dp(4), 0)
-                }
-                wordRow.addView(
-                    wordLabel,
-                    LinearLayout.LayoutParams(0, dp(32), 1f)
-                )
-
-                val removeButton = Button(this).apply {
-                    text = "×"
-                    textSize = 17f
-                    isAllCaps = false
-                    minWidth = 0
-                    minimumWidth = 0
-                    minHeight = 0
-                    minimumHeight = 0
-                    setPadding(0, 0, 0, 0)
-                    setTextColor(Color.WHITE)
-                    background = rounded(violetColor, 7)
-                    setOnClickListener {
-                        personalWords.removeAll { it.equals(savedWord, ignoreCase = true) }
-                        savePersonalWords()
-                        Toast.makeText(this@AntonInputMethodService, "Слово «$savedWord» удалено", Toast.LENGTH_SHORT).show()
-                        showSettings()
-                    }
-                }
-                wordRow.addView(
-                    removeButton,
-                    LinearLayout.LayoutParams(dp(34), dp(30)).apply {
-                        setMargins(dp(2), dp(1), dp(2), dp(1))
-                    }
-                )
-                content.addView(wordRow)
-            }
         }
 
         content.addView(createSettingsLabel("О ПРИЛОЖЕНИИ"))
