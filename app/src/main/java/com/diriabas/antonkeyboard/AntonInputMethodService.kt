@@ -1271,8 +1271,58 @@ class AntonInputMethodService : InputMethodService() {
             addThemeTile(themeRow!!, theme.first, theme.second, theme.third)
         }
 
-        // Personal dictionary is intentionally hidden from Settings UI.
-        // Existing personal words remain available to word suggestions.
+        // Personal dictionary: show learned/custom words with an individual delete control.
+        content.addView(createSettingsLabel("МОЙ СЛОВАРЬ  •  ${personalWords.size}"))
+
+        if (personalWords.isEmpty()) {
+            content.addView(createSettingsLabel("Сохранённых слов пока нет"))
+        } else {
+            personalWords.toList().forEach { savedWord ->
+                val wordRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(4), dp(1), dp(4), dp(1))
+                }
+
+                val wordLabel = TextView(this).apply {
+                    text = savedWord
+                    textSize = 12f
+                    setTextColor(textColorForTheme())
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), 0, dp(4), 0)
+                }
+                wordRow.addView(
+                    wordLabel,
+                    LinearLayout.LayoutParams(0, dp(32), 1f)
+                )
+
+                val removeButton = Button(this).apply {
+                    text = "×"
+                    textSize = 17f
+                    isAllCaps = false
+                    minWidth = 0
+                    minimumWidth = 0
+                    minHeight = 0
+                    minimumHeight = 0
+                    setPadding(0, 0, 0, 0)
+                    setTextColor(Color.WHITE)
+                    background = rounded(violetColor, 7)
+                    setOnClickListener {
+                        personalWords.removeAll { it.equals(savedWord, ignoreCase = true) }
+                        savePersonalWords()
+                        Toast.makeText(this@AntonInputMethodService, "Слово «$savedWord» удалено", Toast.LENGTH_SHORT).show()
+                        showSettings()
+                    }
+                }
+                wordRow.addView(
+                    removeButton,
+                    LinearLayout.LayoutParams(dp(34), dp(30)).apply {
+                        setMargins(dp(2), dp(1), dp(2), dp(1))
+                    }
+                )
+                content.addView(wordRow)
+            }
+        }
 
         content.addView(createSettingsLabel("О ПРИЛОЖЕНИИ"))
         val appInfo = try {
