@@ -10,11 +10,10 @@ import android.os.Bundle
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.RelativeSizeSpan
-import android.text.style.SuperscriptSpan
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.os.Build
@@ -27,6 +26,7 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -385,7 +385,7 @@ class AntonInputMethodService : InputMethodService() {
         // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
 
-        addKey(toolbar, "😊", 1f, keyColor, keyHeight = 30) {
+        addKey(toolbar, "😊", 1f, keyColor, keyHeight = 28) {
             isEmoji = !isEmoji
             isAI = false
             isSettings = false
@@ -393,14 +393,14 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "📋", 1f, keyColor, keyHeight = 30) {
+        addKey(toolbar, "📋", 1f, keyColor, keyHeight = 28) {
             isEmoji = false
             isAI = false
             isSettings = false
             showClipboard()
         }
 
-        addKey(toolbar, "✦", 1f, violetColor, keyHeight = 30) {
+        addKey(toolbar, "✦", 1f, violetColor, keyHeight = 28) {
             isAI = !isAI
             isEmoji = false
             isSettings = false
@@ -408,7 +408,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 30) {
+        addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 28) {
             isRussian = !isRussian
             isSymbols = false
             isEmoji = false
@@ -417,7 +417,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "⚙", 0.72f, keyColor, keyHeight = 30) {
+        addKey(toolbar, "⚙", 0.72f, keyColor, keyHeight = 28) {
             isSettings = !isSettings
             isEmoji = false
             isAI = false
@@ -436,50 +436,116 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun addChristmasDecoration(root: LinearLayout) {
-        val lights = TextView(this).apply {
-            text = "🔴  🟡  🟢  🔵  🟣  🔴  🟡  🟢  🔵"
-            textSize = 11f
-            gravity = Gravity.CENTER
-            setPadding(0, dp(1), 0, dp(1))
-        }
-        root.addView(lights, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(16)
+        // A real animated decoration view: a curved string of colorful lights
+        // and independently falling snowflakes. Animation stops when detached.
+        root.addView(ChristmasDecorationView(this), LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
         ))
+    }
 
-        val snowfall = TextView(this).apply {
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(205, 235, 255))
-            setPadding(0, 0, 0, 0)
-        }
-        root.addView(snowfall, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(17)
-        ))
-
-        val frames = listOf(
-            "❄       ·        ❅       ·        ❄",
-            "·     ❄        ·       ❅       ·",
-            "❅       ·        ❄       ·        ❅",
-            "·       ❅       ·        ❄       ·"
+    private inner class ChristmasDecorationView(context: Context) : View(context) {
+        private data class Flake(var x: Float, var y: Float, var radius: Float, var speed: Float, var drift: Float)
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val flakes = ArrayList<Flake>()
+        private val bulbColors = intArrayOf(
+            Color.rgb(255, 74, 89), Color.rgb(255, 205, 67),
+            Color.rgb(91, 226, 142), Color.rgb(75, 181, 255),
+            Color.rgb(205, 115, 255)
         )
-        val handler = Handler(Looper.getMainLooper())
-        var frame = 0
-        val animation = object : Runnable {
+        private var phase = 0f
+        private var running = false
+        private val frame = object : Runnable {
             override fun run() {
-                snowfall.text = frames[frame % frames.size]
-                frame++
-                if (snowfall.isAttachedToWindow) handler.postDelayed(this, 650L)
+                if (!isAttachedToWindow) return
+                phase += 0.12f
+                invalidate()
+                postDelayed(this, 45L)
             }
         }
-        snowfall.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(view: View) {
-                handler.removeCallbacks(animation)
-                handler.post(animation)
+
+        init {
+            flakes.addAll((0 until 32).map { i ->
+                Flake(
+                    x = (i * 47 % 997) / 997f,
+                    y = (i * 31 % 991) / 991f,
+                    radius = 1.8f + (i % 4) * 0.7f,
+                    speed = 0.004f + (i % 5) * 0.0014f,
+                    drift = if (i % 2 == 0) 0.0015f else -0.0012f
+                )
+            })
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            if (!running) {
+                running = true
+                removeCallbacks(frame)
+                post(frame)
             }
-            override fun onViewDetachedFromWindow(view: View) {
-                handler.removeCallbacks(animation)
+        }
+
+        override fun onDetachedFromWindow() {
+            running = false
+            removeCallbacks(frame)
+            super.onDetachedFromWindow()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+
+            // Fine, curved wire with warm glow.
+            val wire = Path().apply {
+                moveTo(0f, h * 0.20f)
+                cubicTo(w * 0.25f, h * 0.62f, w * 0.72f, h * 0.62f, w, h * 0.20f)
             }
-        })
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = dp(1.5f.toInt().coerceAtLeast(1)).toFloat()
+            paint.color = Color.rgb(160, 190, 225)
+            canvas.drawPath(wire, paint)
+
+            // Color bulbs pulse independently along the wire.
+            paint.style = Paint.Style.FILL
+            for (i in 0 until 13) {
+                val t = i / 12f
+                val x = w * t
+                val y = h * (0.20f + 0.42f * (1f - 4f * (t - 0.5f) * (t - 0.5f)))
+                val pulse = 0.72f + 0.28f * kotlin.math.sin(phase + i * 0.82f).toFloat().coerceAtLeast(0f)
+                val color = bulbColors[i % bulbColors.size]
+                paint.color = Color.argb((65 * pulse).toInt(), Color.red(color), Color.green(color), Color.blue(color))
+                canvas.drawCircle(x, y, dp(10).toFloat(), paint)
+                paint.color = color
+                canvas.drawCircle(x, y, dp(4).toFloat() * pulse, paint)
+                paint.color = Color.WHITE
+                canvas.drawCircle(x - dp(1).toFloat(), y - dp(1).toFloat(), dp(0.8f.toInt()).toFloat().coerceAtLeast(1f), paint)
+            }
+
+            // Snowflakes drift down at different speeds; each is drawn as a small star.
+            paint.color = Color.rgb(220, 241, 255)
+            paint.strokeWidth = dp(1).toFloat()
+            paint.strokeCap = Paint.Cap.ROUND
+            paint.style = Paint.Style.STROKE
+            flakes.forEach { flake ->
+                val x = flake.x * w
+                val y = flake.y * h
+                val r = dp(flake.radius.toInt().coerceAtLeast(1)).toFloat()
+                canvas.drawLine(x - r, y, x + r, y, paint)
+                canvas.drawLine(x, y - r, x, y + r, paint)
+                canvas.drawLine(x - r * .7f, y - r * .7f, x + r * .7f, y + r * .7f, paint)
+                canvas.drawLine(x - r * .7f, y + r * .7f, x + r * .7f, y - r * .7f, paint)
+                flake.y += flake.speed
+                flake.x += flake.drift + kotlin.math.sin(phase + y * .02f).toFloat() * 0.00025f
+                if (flake.y > 1.08f) {
+                    flake.y = -0.08f
+                    flake.x = ((flake.x * 997f + 173f) % 997f) / 997f
+                }
+                if (flake.x < -0.05f) flake.x = 1.05f
+                if (flake.x > 1.05f) flake.x = -0.05f
+            }
+        }
     }
 
     private fun showLetters(root: LinearLayout) {
@@ -510,7 +576,7 @@ class AntonInputMethodService : InputMethodService() {
         if (!isSymbols) {
             val numberRow = newRow()
             listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").forEach { number ->
-                addKey(numberRow, number, 1f, keyHeight = 43) {
+                addKey(numberRow, number, 1f, keyHeight = 38) {
                     currentInputConnection?.commitText(number, 1)
                     updateSuggestions()
                 }
@@ -586,7 +652,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(bottom, if (isRussian) "Русский" else "English", 4f, keyColor, keyHeight = 48) {
+        addKey(bottom, if (isRussian) "Русский" else "English", 4f, keyColor, keyHeight = 44) {
             commitSpaceWithCorrection()
             refresh()
         }
@@ -1071,37 +1137,34 @@ class AntonInputMethodService : InputMethodService() {
         label: String,
         weight: Float,
         color: Int = keyColor,
-        keyHeight: Int = 49,
+        keyHeight: Int = 44,
         repeatAction: (() -> Unit)? = null,
         longPressAction: (() -> Unit)? = null,
         action: () -> Unit
     ) {
+        // Keep the main glyph in its own centered TextView. Secondary symbols
+        // are an independent top-right label, so they cannot shift the letter baseline.
+        val keyFrame = FrameLayout(this)
         val button = Button(this).apply {
             text = label
             textSize = when {
-                label.length == 1 && label[0].isLetter() -> 25f
-                label.length > 6 -> 11f
-                else -> 17f
+                label.length == 1 && label[0].isLetter() -> 23f
+                label.length > 6 -> 10f
+                else -> 16f
             }
+            gravity = Gravity.CENTER
+            includeFontPadding = false
             isAllCaps = false
-            if (label.length == 1 && label[0].isLetter() && !isSymbols) {
-                val secondary = secondarySymbol(label.lowercase(Locale.ROOT))
-                if (secondary.isNotEmpty()) {
-                    val decorated = SpannableString(label + secondary)
-                    decorated.setSpan(RelativeSizeSpan(0.42f), 1, decorated.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    decorated.setSpan(SuperscriptSpan(), 1, decorated.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    text = decorated
-                }
-            }
             setTextColor(if (color == violetColor || color == accentColor) Color.WHITE else textColorForTheme())
             setTypeface(Typeface.create("sans-serif", Typeface.NORMAL))
-            background = rounded(color, 8)
+            background = if (selectedTheme == "new_year") festiveKeyBackground(color) else rounded(color, 8)
             elevation = dp(2).toFloat()
             minHeight = 0
             minimumHeight = 0
             isFocusable = false
             isSoundEffectsEnabled = false
             setPadding(dp(1), 0, dp(1), 0)
+            stateListAnimator = null
 
             if (repeatAction == null && longPressAction == null) {
                 setOnTouchListener { view, event ->
@@ -1151,7 +1214,6 @@ class AntonInputMethodService : InputMethodService() {
                         handler.postDelayed(this, 55L)
                     }
                 }
-
                 setOnTouchListener { _, event ->
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
@@ -1165,8 +1227,7 @@ class AntonInputMethodService : InputMethodService() {
                             if (!repeating) action()
                             true
                         }
-                        MotionEvent.ACTION_CANCEL,
-                        MotionEvent.ACTION_OUTSIDE -> {
+                        MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
                             handler.removeCallbacks(repeatTask)
                             true
                         }
@@ -1175,16 +1236,36 @@ class AntonInputMethodService : InputMethodService() {
                 }
             }
         }
+        keyFrame.addView(button, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
 
-        val params = LinearLayout.LayoutParams(
-            0,
-            dp(keyHeight),
-            weight
-        ).apply {
-            setMargins(dp(2), dp(2), dp(2), dp(2))
+        if (label.length == 1 && label[0].isLetter() && !isSymbols) {
+            val secondary = secondarySymbol(label.lowercase(Locale.ROOT))
+            if (secondary.isNotEmpty()) {
+                val secondaryView = TextView(this).apply {
+                    text = secondary
+                    textSize = 9f
+                    includeFontPadding = false
+                    gravity = Gravity.CENTER
+                    setTextColor(if (selectedTheme == "new_year") Color.rgb(220, 239, 255) else textColorForTheme())
+                    setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                    isClickable = false
+                    isFocusable = false
+                }
+                val secondaryParams = FrameLayout.LayoutParams(dp(14), dp(13), Gravity.TOP or Gravity.END).apply {
+                    topMargin = dp(3)
+                    marginEnd = dp(4)
+                }
+                keyFrame.addView(secondaryView, secondaryParams)
+            }
         }
 
-        row.addView(button, params)
+        val params = LinearLayout.LayoutParams(0, dp(keyHeight), weight).apply {
+            setMargins(dp(2), dp(2), dp(2), dp(2))
+        }
+        row.addView(keyFrame, params)
     }
 
     private fun secondarySymbol(letter: String): String {
@@ -1198,6 +1279,32 @@ class AntonInputMethodService : InputMethodService() {
         )
         return symbols[letter] ?: ""
     }
+
+    private fun festiveKeyBackground(color: Int): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                lighten(color, 1.22f),
+                color,
+                darken(color, 0.78f)
+            )
+        ).apply {
+            cornerRadius = dp(9).toFloat()
+            setStroke(dp(1), Color.argb(150, 137, 211, 255))
+        }
+    }
+
+    private fun lighten(color: Int, factor: Float): Int = Color.rgb(
+        (Color.red(color) * factor).toInt().coerceAtMost(255),
+        (Color.green(color) * factor).toInt().coerceAtMost(255),
+        (Color.blue(color) * factor).toInt().coerceAtMost(255)
+    )
+
+    private fun darken(color: Int, factor: Float): Int = Color.rgb(
+        (Color.red(color) * factor).toInt(),
+        (Color.green(color) * factor).toInt(),
+        (Color.blue(color) * factor).toInt()
+    )
 
     private fun rounded(color: Int, radius: Int): GradientDrawable {
         return GradientDrawable().apply {
