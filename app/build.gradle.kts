@@ -12,8 +12,8 @@ android {
         applicationId = "com.diriabas.antonkeyboard"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+       versionCode = 67
+versionName = "0.9.1"
     }
 
     compileOptions {
