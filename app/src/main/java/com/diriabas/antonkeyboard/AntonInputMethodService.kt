@@ -1,7 +1,12 @@
+
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
+import android.Manifest
 import android.content.ClipData
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
@@ -18,7 +23,12 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.textservice.TextServicesManager
+import android.view.textservice.SpellCheckerSession
+import android.view.textservice.TextInfo
+import android.view.textservice.SuggestionsInfo
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -30,8 +40,6 @@ import org.json.JSONArray
 
 class AntonInputMethodService : InputMethodService() {
 
-    // Flake вынесен сюда, на уровень основного класса.
-    // Это исправляет ошибку Kotlin: 'Class' is prohibited here.
     private data class Flake(
         var x: Float,
         var y: Float,
@@ -52,20 +60,21 @@ class AntonInputMethodService : InputMethodService() {
 
     private var keyboardRoot: LinearLayout? = null
     private var suggestionsRow: LinearLayout? = null
+    private var spellCheckerSession: SpellCheckerSession? = null
+    private var spellCheckerLocale: Locale? = null
+    private var requestedSpellWord: String = ""
+    private var systemSuggestions: List<String> = emptyList()
 
     private val clipboardHistory = mutableListOf<String>()
     private val maxClipboardItems = 20
 
     private val personalWords = mutableListOf<String>()
-    private val maxSuggestions = 5
-
     private var autoCorrectionEnabled = true
     private var autoPunctuationSpaceEnabled = true
     private var autoCapitalizationEnabled = true
 
     private var selectedTheme = "dark_gray"
     private var glassTheme = false
-
     private var backgroundColor = Color.rgb(14, 17, 29)
     private var keyColor = Color.rgb(34, 40, 59)
     private var accentColor = Color.rgb(67, 205, 255)
@@ -73,19 +82,43 @@ class AntonInputMethodService : InputMethodService() {
 
     private val corrections = mapOf(
         "превет" to "привет",
+        "приветт" to "привет",
         "спосибо" to "спасибо",
+        "спасибоо" to "спасибо",
         "пожалуста" to "пожалуйста",
+        "пажалуйста" to "пожалуйста",
+        "севодня" to "сегодня",
+        "сигодня" to "сегодня",
+        "завтро" to "завтра",
+        "кароче" to "короче",
+        "щас" to "сейчас",
+        "чево" to "чего",
+        "чтобыы" to "чтобы",
         "здравствуйтее" to "здравствуйте",
+        "извените" to "извините",
+        "извеняюсь" to "извиняюсь",
+        "вообщем" to "в общем",
+        "потаму" to "потому",
+        "пачему" to "почему",
+        "сабака" to "собака",
+        "кошак" to "кошка",
         "teh" to "the",
         "adn" to "and",
         "recieve" to "receive",
-        "becouse" to "because"
+        "becouse" to "because",
+        "definately" to "definitely",
+        "seperate" to "separate",
+        "thier" to "their",
+        "wierd" to "weird",
+        "freind" to "friend",
+        "langauge" to "language",
+        "wich" to "which"
     )
 
     private val russianWords = listOf(
-        "привет", "приветик", "приветствую",
-        "привычка", "привычный", "привести", "приведу",
-        "приводить", "привлекательный",
+        "привет", "приветик", "приветствую", "привычка", "привычный",
+        "привык", "привыкнуть", "привести", "приведу", "приведёт",
+        "приводить", "приводит", "привезти", "привязать", "привлечение",
         "пожалуйста", "пожалуй", "пожаловаться",
         "спасибо", "спасибо большое",
         "здравствуйте", "добро", "добрый", "доброе",
@@ -104,15 +137,7 @@ class AntonInputMethodService : InputMethodService() {
         "конечно", "точно", "сейчас",
         "клавиатура", "телефон", "компьютер",
         "интересно", "понятно", "правильно",
-        "извини", "извините", "поздравляю",
-        "возможно", "вместе", "вопрос", "время",
-        "всегда", "говорить", "говорю", "делать",
-        "думаю", "кажется", "который", "красиво",
-        "лучше", "молодец", "наверное", "например",
-        "нравится", "обязательно", "отправить",
-        "получилось", "посмотреть", "проверить",
-        "разговор", "сообщение", "сегодняшний",
-        "сделать", "спокойно", "хотеть", "хорошего"
+        "извини", "извините", "поздравляю"
     )
 
     private val englishWords = listOf(
@@ -137,15 +162,56 @@ class AntonInputMethodService : InputMethodService() {
         "beautiful", "because",
         "before", "between", "better",
         "interesting", "important",
-        "understand", "unfortunately",
-        "anything", "anyone", "another", "around",
-        "always", "already", "beautifully", "believe",
-        "between", "business", "certain", "change",
-        "different", "everything", "example", "family",
-        "favorite", "following", "friendship", "getting",
-        "happened", "however", "language", "learning",
-        "message", "nothing", "people", "probably",
-        "something", "sometimes", "together", "without"
+        "understand", "unfortunately"
+    )
+
+    private val extraRussianWords = listOf(
+        "абсолютно", "автоматически", "аккуратно", "активно", "актуально",
+        "анализ", "аппарат", "аргумент", "безопасность", "близко",
+        "быстро", "важно", "вариант", "вместе", "возможность", "вопрос",
+        "время", "всегда", "встреча", "выглядит", "говорить", "готово",
+        "давно", "давай", "действительно", "делать", "деньги", "дорога",
+        "достаточно", "другой", "если", "естественно", "желаю", "жизнь",
+        "зависит", "закон", "замечательно", "запомнить", "здорово",
+        "значит", "изменить", "изображение", "информация", "исправить",
+        "кажется", "каждый", "качество", "когда", "количество", "команда",
+        "конкретно", "который", "красиво", "кроме", "лучше", "любовь",
+        "магазин", "маленький", "машина", "медленно", "место", "мнение",
+        "может", "моменты", "много", "наверное", "надеюсь", "название",
+        "написать", "настоящий", "начать", "недавно", "необходимо",
+        "неправильно", "новый", "обязательно", "обычно", "объяснить",
+        "общение", "оказалось", "около", "опять", "ответ", "отправить",
+        "первый", "перевод", "пожалуйста", "позже", "получается",
+        "помощь", "посмотреть", "последний", "почему-то", "правильно",
+        "прекрасно", "приложение", "пример", "проблема", "продолжить",
+        "просто", "работает", "разговор", "размер", "разница", "решение",
+        "сделать", "система", "сколько", "следующий", "слово", "смотреть",
+        "совершенно", "сообщение", "спокойно", "спросить", "сразу",
+        "стараться", "становится", "сторона", "телефон", "теперь",
+        "точный", "удобно", "уже", "улучшить", "устройство", "функция",
+        "хорошо", "хотеть", "часто", "человек", "через", "чтобы", "эта", "это"
+    )
+
+    private val extraEnglishWords = listOf(
+        "about", "above", "account", "across", "actually", "address",
+        "after", "again", "against", "almost", "already", "always",
+        "another", "answer", "anything", "around", "available", "beautiful",
+        "believe", "between", "build", "business", "change", "check",
+        "choose", "clear", "coming", "common", "complete", "correct",
+        "could", "different", "doing", "during", "early", "easy",
+        "enough", "especially", "everything", "example", "experience",
+        "family", "favorite", "first", "follow", "found", "friendship",
+        "getting", "going", "happen", "having", "heard", "however",
+        "including", "information", "inside", "instead", "keyboard",
+        "language", "later", "learning", "little", "looking", "making",
+        "maybe", "message", "mistake", "moment", "money", "morning",
+        "nothing", "number", "often", "online", "outside", "people",
+        "perhaps", "phone", "place", "please", "possible", "probably",
+        "problem", "quickly", "really", "remember", "right", "screen",
+        "second", "something", "sometimes", "started", "still", "system",
+        "taking", "their", "there", "these", "thing", "think", "through",
+        "together", "trying", "under", "until", "using", "usually",
+        "version", "wanted", "watch", "which", "without", "wonderful", "would", "written"
     )
 
     override fun onCreate() {
@@ -156,20 +222,21 @@ class AntonInputMethodService : InputMethodService() {
         loadTheme()
     }
 
+    override fun onDestroy() {
+        spellCheckerSession?.close()
+        spellCheckerSession = null
+        super.onDestroy()
+    }
+
     override fun onCreateInputView(): View {
+        // Match Android's navigation bar to the keyboard background.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window?.window?.apply {
-                addFlags(
-                    android.view.WindowManager.LayoutParams
-                        .FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
-                )
-
+                addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
                 navigationBarColor = backgroundColor
-
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     navigationBarDividerColor = backgroundColor
                 }
-
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     isNavigationBarContrastEnforced = false
                 }
@@ -182,34 +249,24 @@ class AntonInputMethodService : InputMethodService() {
             setBackgroundColor(backgroundColor)
         }
 
+        // Keep the keyboard above Android's navigation bar / gesture area.
         root.setOnApplyWindowInsetsListener { view, insets ->
-            val navigationBarBottom =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    insets.getInsets(
-                        WindowInsets.Type.navigationBars()
-                    ).bottom
-                } else {
-                    @Suppress("DEPRECATION")
-                    insets.systemWindowInsetBottom
-                }
-
+            val navigationBarBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
             val safeBottom = maxOf(dp(6), navigationBarBottom)
-
-            view.setPadding(
-                dp(5),
-                0,
-                dp(5),
-                safeBottom
-            )
-
+            view.setPadding(dp(5), 0, dp(5), safeBottom)
             insets
         }
-
         root.requestApplyInsets()
 
         keyboardRoot = root
         renderKeyboard(root)
 
+        // Keep the IME window close to the actual keyboard content height.
         window?.window?.setLayout(
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -219,52 +276,28 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun loadKeyboardSettings() {
-        val prefs = getSharedPreferences(
-            "anton_keyboard",
-            Context.MODE_PRIVATE
-        )
-
-        autoCorrectionEnabled =
-            prefs.getBoolean("auto_correction", true)
-
-        autoPunctuationSpaceEnabled =
-            prefs.getBoolean("auto_punctuation_space", true)
-
-        autoCapitalizationEnabled =
-            prefs.getBoolean("auto_capitalization", true)
+        val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+        autoCorrectionEnabled = prefs.getBoolean("auto_correction", true)
+        autoPunctuationSpaceEnabled = prefs.getBoolean("auto_punctuation_space", true)
+        autoCapitalizationEnabled = prefs.getBoolean("auto_capitalization", true)
     }
 
     private fun loadTheme() {
-        val prefs = getSharedPreferences(
-            "anton_keyboard",
-            Context.MODE_PRIVATE
-        )
-
-        selectedTheme =
-            prefs.getString("keyboard_theme", "dark_gray")
-                ?: "dark_gray"
-
+        val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+        selectedTheme = prefs.getString("keyboard_theme", "dark_gray") ?: "dark_gray"
         glassTheme = selectedTheme == "glass"
-
         applyThemeColors()
     }
 
     private fun saveTheme(theme: String) {
         selectedTheme = theme
         glassTheme = theme == "glass"
-
-        getSharedPreferences(
-            "anton_keyboard",
-            Context.MODE_PRIVATE
-        ).edit()
+        getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
             .putString("keyboard_theme", theme)
             .apply()
-
         applyThemeColors()
-
         keyboardRoot?.setBackgroundColor(backgroundColor)
         window?.window?.navigationBarColor = backgroundColor
-
         refresh()
     }
 
@@ -276,42 +309,36 @@ class AntonInputMethodService : InputMethodService() {
                 accentColor = Color.rgb(225, 229, 235)
                 violetColor = Color.rgb(157, 165, 178)
             }
-
             "dark_gray" -> {
                 backgroundColor = Color.rgb(35, 38, 42)
                 keyColor = Color.rgb(68, 72, 77)
                 accentColor = Color.rgb(205, 210, 216)
                 violetColor = Color.rgb(91, 145, 238)
             }
-
             "blue" -> {
                 backgroundColor = Color.rgb(8, 31, 66)
                 keyColor = Color.rgb(20, 62, 112)
                 accentColor = Color.rgb(77, 177, 255)
                 violetColor = Color.rgb(67, 125, 230)
             }
-
             "light_blue" -> {
                 backgroundColor = Color.rgb(190, 220, 242)
                 keyColor = Color.rgb(218, 237, 250)
                 accentColor = Color.rgb(48, 119, 174)
                 violetColor = Color.rgb(91, 153, 211)
             }
-
             "light_green" -> {
                 backgroundColor = Color.rgb(196, 222, 199)
                 keyColor = Color.rgb(220, 239, 221)
                 accentColor = Color.rgb(53, 117, 75)
                 violetColor = Color.rgb(105, 164, 119)
             }
-
             "glass" -> {
                 backgroundColor = Color.rgb(18, 24, 39)
                 keyColor = Color.argb(155, 115, 150, 190)
                 accentColor = Color.argb(210, 205, 231, 255)
                 violetColor = Color.argb(185, 130, 155, 255)
             }
-
             "new_year" -> {
                 backgroundColor = Color.rgb(7, 19, 43)
                 keyColor = Color.rgb(22, 48, 79)
@@ -322,41 +349,22 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun saveKeyboardSettings() {
-        getSharedPreferences(
-            "anton_keyboard",
-            Context.MODE_PRIVATE
-        ).edit()
+        getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
             .putBoolean("auto_correction", autoCorrectionEnabled)
-            .putBoolean(
-                "auto_punctuation_space",
-                autoPunctuationSpaceEnabled
-            )
-            .putBoolean(
-                "auto_capitalization",
-                autoCapitalizationEnabled
-            )
+            .putBoolean("auto_punctuation_space", autoPunctuationSpaceEnabled)
+            .putBoolean("auto_capitalization", autoCapitalizationEnabled)
             .apply()
     }
 
     private fun loadPersonalWords() {
-        val prefs = getSharedPreferences(
-            "anton_keyboard",
-            Context.MODE_PRIVATE
-        )
-
-        val saved =
-            prefs.getString("personal_words", "[]") ?: "[]"
-
+        val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
+        val saved = prefs.getString("personal_words", "[]") ?: "[]"
         try {
             val array = JSONArray(saved)
             personalWords.clear()
-
             for (i in 0 until array.length()) {
                 val word = array.optString(i).trim()
-
-                if (word.isNotEmpty() && word !in personalWords) {
-                    personalWords.add(word)
-                }
+                if (word.isNotEmpty() && word !in personalWords) personalWords.add(word)
             }
         } catch (_: Exception) {
             personalWords.clear()
@@ -365,53 +373,26 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun savePersonalWords() {
         val array = JSONArray()
-
-        personalWords.forEach {
-            array.put(it)
-        }
-
-        getSharedPreferences(
-            "anton_keyboard",
-            Context.MODE_PRIVATE
-        ).edit()
+        personalWords.forEach { array.put(it) }
+        getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE).edit()
             .putString("personal_words", array.toString())
             .apply()
     }
 
     private fun addPersonalWord(word: String) {
         val cleaned = word.trim()
-
         if (cleaned.isEmpty()) return
-
         if (!Regex("^[А-Яа-яЁёA-Za-z-]+$").matches(cleaned)) {
-            Toast.makeText(
-                this,
-                "Используй одно слово без пробелов и символов",
-                Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(this, "Используй одно слово без пробелов и символов", Toast.LENGTH_SHORT).show()
             return
         }
-
-        if (personalWords.any {
-                it.equals(cleaned, ignoreCase = true)
-            }) {
-            Toast.makeText(
-                this,
-                "Это слово уже есть в словаре",
-                Toast.LENGTH_SHORT
-            ).show()
+        if (personalWords.any { it.equals(cleaned, ignoreCase = true) }) {
+            Toast.makeText(this, "Это слово уже есть в словаре", Toast.LENGTH_SHORT).show()
             return
         }
-
         personalWords.add(0, cleaned)
         savePersonalWords()
-
-        Toast.makeText(
-            this,
-            "Слово добавлено",
-            Toast.LENGTH_SHORT
-        ).show()
-
+        Toast.makeText(this, "Слово добавлено", Toast.LENGTH_SHORT).show()
         showSettings()
     }
 
@@ -421,8 +402,7 @@ class AntonInputMethodService : InputMethodService() {
             Context.MODE_PRIVATE
         )
 
-        val saved =
-            prefs.getString("clipboard_history", "[]") ?: "[]"
+        val saved = prefs.getString("clipboard_history", "[]") ?: "[]"
 
         try {
             val array = JSONArray(saved)
@@ -430,7 +410,6 @@ class AntonInputMethodService : InputMethodService() {
 
             for (i in 0 until array.length()) {
                 val item = array.optString(i)
-
                 if (item.isNotBlank()) {
                     clipboardHistory.add(item)
                 }
@@ -443,8 +422,8 @@ class AntonInputMethodService : InputMethodService() {
     private fun saveClipboardHistory() {
         val array = JSONArray()
 
-        clipboardHistory.forEach {
-            array.put(it)
+        clipboardHistory.forEach { item ->
+            array.put(item)
         }
 
         getSharedPreferences(
@@ -481,8 +460,7 @@ class AntonInputMethodService : InputMethodService() {
             null
         }
 
-        val text = clip
-            ?.takeIf { it.itemCount > 0 }
+        val text = clip?.takeIf { it.itemCount > 0 }
             ?.getItemAt(0)
             ?.coerceToText(this)
             ?.toString()
@@ -496,10 +474,12 @@ class AntonInputMethodService : InputMethodService() {
         root.removeAllViews()
         suggestionsRow = null
 
+        // Festive decoration appears only in the New Year theme.
         if (selectedTheme == "new_year") {
             addChristmasDecoration(root)
         }
 
+        // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
 
         addKey(toolbar, "😊", 1f, keyColor, keyHeight = 28) {
@@ -514,7 +494,6 @@ class AntonInputMethodService : InputMethodService() {
             isEmoji = false
             isAI = false
             isSettings = false
-            isSymbols = false
             showClipboard()
         }
 
@@ -540,12 +519,7 @@ class AntonInputMethodService : InputMethodService() {
             isEmoji = false
             isAI = false
             isSymbols = false
-
-            if (isSettings) {
-                showSettings()
-            } else {
-                refresh()
-            }
+            if (isSettings) showSettings() else refresh()
         }
 
         root.addView(toolbar)
@@ -559,37 +533,26 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun addChristmasDecoration(root: LinearLayout) {
-        root.addView(
-            ChristmasDecorationView(this),
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(54)
-            )
-        )
+        // A real animated decoration view: a curved string of colorful lights
+        // and independently falling snowflakes. Animation stops when detached.
+        root.addView(ChristmasDecorationView(this), LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
+        ))
     }
 
-    private inner class ChristmasDecorationView(
-        context: Context
-    ) : View(context) {
-
+    private inner class ChristmasDecorationView(context: Context) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val flakes = ArrayList<Flake>()
-
         private val bulbColors = intArrayOf(
-            Color.rgb(255, 74, 89),
-            Color.rgb(255, 205, 67),
-            Color.rgb(91, 226, 142),
-            Color.rgb(75, 181, 255),
+            Color.rgb(255, 74, 89), Color.rgb(255, 205, 67),
+            Color.rgb(91, 226, 142), Color.rgb(75, 181, 255),
             Color.rgb(205, 115, 255)
         )
-
         private var phase = 0f
         private var running = false
-
         private val frame = object : Runnable {
             override fun run() {
                 if (!isAttachedToWindow) return
-
                 phase += 0.12f
                 invalidate()
                 postDelayed(this, 45L)
@@ -597,28 +560,20 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         init {
-            flakes.addAll(
-                (0 until 32).map { i ->
-                    Flake(
-                        x = (i * 47 % 997) / 997f,
-                        y = (i * 31 % 991) / 991f,
-                        radius = 1.8f + (i % 4) * 0.7f,
-                        speed = 0.004f + (i % 5) * 0.0014f,
-                        drift = if (i % 2 == 0) {
-                            0.0015f
-                        } else {
-                            -0.0012f
-                        }
-                    )
-                }
-            )
-
+            flakes.addAll((0 until 32).map { i ->
+                Flake(
+                    x = (i * 47 % 997) / 997f,
+                    y = (i * 31 % 991) / 991f,
+                    radius = 1.8f + (i % 4) * 0.7f,
+                    speed = 0.004f + (i % 5) * 0.0014f,
+                    drift = if (i % 2 == 0) 0.0015f else -0.0012f
+                )
+            })
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         }
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
-
             if (!running) {
                 running = true
                 removeCallbacks(frame)
@@ -634,134 +589,57 @@ class AntonInputMethodService : InputMethodService() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-
             val w = width.toFloat()
             val h = height.toFloat()
-
             if (w <= 0f || h <= 0f) return
 
+            // Fine, curved wire with warm glow.
             val wire = Path().apply {
                 moveTo(0f, h * 0.20f)
-                cubicTo(
-                    w * 0.25f,
-                    h * 0.62f,
-                    w * 0.72f,
-                    h * 0.62f,
-                    w,
-                    h * 0.20f
-                )
+                cubicTo(w * 0.25f, h * 0.62f, w * 0.72f, h * 0.62f, w, h * 0.20f)
             }
-
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = dp(1).toFloat()
+            paint.strokeWidth = dp(1.5f.toInt().coerceAtLeast(1)).toFloat()
             paint.color = Color.rgb(160, 190, 225)
-
             canvas.drawPath(wire, paint)
 
+            // Color bulbs pulse independently along the wire.
             paint.style = Paint.Style.FILL
-
             for (i in 0 until 13) {
                 val t = i / 12f
                 val x = w * t
-
-                val y = h * (
-                    0.20f + 0.42f *
-                        (1f - 4f * (t - 0.5f) * (t - 0.5f))
-                    )
-
-                val pulse = (
-                    0.72f +
-                        0.28f * kotlin.math.sin(
-                            phase + i * 0.82f
-                        ).toFloat().coerceAtLeast(0f)
-                    )
-
+                val y = h * (0.20f + 0.42f * (1f - 4f * (t - 0.5f) * (t - 0.5f)))
+                val pulse = 0.72f + 0.28f * kotlin.math.sin(phase + i * 0.82f).toFloat().coerceAtLeast(0f)
                 val color = bulbColors[i % bulbColors.size]
-
-                paint.color = Color.argb(
-                    (65 * pulse).toInt(),
-                    Color.red(color),
-                    Color.green(color),
-                    Color.blue(color)
-                )
-
-                canvas.drawCircle(
-                    x,
-                    y,
-                    dp(10).toFloat(),
-                    paint
-                )
-
+                paint.color = Color.argb((65 * pulse).toInt(), Color.red(color), Color.green(color), Color.blue(color))
+                canvas.drawCircle(x, y, dp(10).toFloat(), paint)
                 paint.color = color
-
-                canvas.drawCircle(
-                    x,
-                    y,
-                    dp(4).toFloat() * pulse,
-                    paint
-                )
-
+                canvas.drawCircle(x, y, dp(4).toFloat() * pulse, paint)
                 paint.color = Color.WHITE
-
-                canvas.drawCircle(
-                    x - dp(1).toFloat(),
-                    y - dp(1).toFloat(),
-                    dp(1).toFloat(),
-                    paint
-                )
+                canvas.drawCircle(x - dp(1).toFloat(), y - dp(1).toFloat(), dp(0.8f.toInt()).toFloat().coerceAtLeast(1f), paint)
             }
 
+            // Snowflakes drift down at different speeds; each is drawn as a small star.
             paint.color = Color.rgb(220, 241, 255)
             paint.strokeWidth = dp(1).toFloat()
             paint.strokeCap = Paint.Cap.ROUND
             paint.style = Paint.Style.STROKE
-
             flakes.forEach { flake ->
                 val x = flake.x * w
                 val y = flake.y * h
-
-                val r = dp(
-                    flake.radius.toInt().coerceAtLeast(1)
-                ).toFloat()
-
+                val r = dp(flake.radius.toInt().coerceAtLeast(1)).toFloat()
                 canvas.drawLine(x - r, y, x + r, y, paint)
                 canvas.drawLine(x, y - r, x, y + r, paint)
-
-                canvas.drawLine(
-                    x - r * 0.7f,
-                    y - r * 0.7f,
-                    x + r * 0.7f,
-                    y + r * 0.7f,
-                    paint
-                )
-
-                canvas.drawLine(
-                    x - r * 0.7f,
-                    y + r * 0.7f,
-                    x + r * 0.7f,
-                    y - r * 0.7f,
-                    paint
-                )
-
+                canvas.drawLine(x - r * .7f, y - r * .7f, x + r * .7f, y + r * .7f, paint)
+                canvas.drawLine(x - r * .7f, y + r * .7f, x + r * .7f, y - r * .7f, paint)
                 flake.y += flake.speed
-
-                flake.x += flake.drift +
-                    kotlin.math.sin(phase + y * 0.02f)
-                        .toFloat() * 0.00025f
-
+                flake.x += flake.drift + kotlin.math.sin(phase + y * .02f).toFloat() * 0.00025f
                 if (flake.y > 1.08f) {
                     flake.y = -0.08f
-                    flake.x =
-                        ((flake.x * 997f + 173f) % 997f) / 997f
+                    flake.x = ((flake.x * 997f + 173f) % 997f) / 997f
                 }
-
-                if (flake.x < -0.05f) {
-                    flake.x = 1.05f
-                }
-
-                if (flake.x > 1.05f) {
-                    flake.x = -0.05f
-                }
+                if (flake.x < -0.05f) flake.x = 1.05f
+                if (flake.x > 1.05f) flake.x = -0.05f
             }
         }
     }
@@ -773,43 +651,22 @@ class AntonInputMethodService : InputMethodService() {
 
         val rows = when {
             isSymbols -> listOf(
-                listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"),
-                listOf("@", "#", "$", "%", "&", "-", "+", "(", ")", "/"),
-                listOf("*", "\"", "'", ";", ":", "!", "?")
+                listOf("1","2","3","4","5","6","7","8","9","0"),
+                listOf("@","#","$","%","&","-","+","(",")","/"),
+                listOf("*","\"","'",";",":","!","?")
             )
 
             isRussian -> listOf(
-                listOf("й", "ц", "у", "к", "е", "н", "г", "ш", "щ", "з", "х"),
-                listOf("ф", "ы", "в", "а", "п", "р", "о", "л", "д", "ж", "э"),
-                listOf("я", "ч", "с", "м", "и", "т", "ь", "б", "ю", "ё")
+                listOf("й","ц","у","к","е","н","г","ш","щ","з","х"),
+                listOf("ф","ы","в","а","п","р","о","л","д","ж","э"),
+                listOf("я","ч","с","м","и","т","ь","б","ю","ё")
             )
 
             else -> listOf(
-                listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),
-                listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"),
-                listOf("z", "x", "c", "v", "b", "n", "m")
+                listOf("q","w","e","r","t","y","u","i","o","p"),
+                listOf("a","s","d","f","g","h","j","k","l"),
+                listOf("z","x","c","v","b","n","m")
             )
-        }
-
-        if (!isSymbols) {
-            val numberRow = newRow()
-
-            listOf(
-                "1", "2", "3", "4", "5",
-                "6", "7", "8", "9", "0"
-            ).forEach { number ->
-                addKey(
-                    numberRow,
-                    number,
-                    1f,
-                    keyHeight = 38
-                ) {
-                    currentInputConnection?.commitText(number, 1)
-                    updateSuggestions()
-                }
-            }
-
-            root.addView(numberRow)
         }
 
         rows.forEachIndexed { index, keys ->
@@ -820,11 +677,7 @@ class AntonInputMethodService : InputMethodService() {
                     row,
                     if (capsLock) "⇪" else "⇧",
                     1.3f,
-                    if (shift || capsLock || shouldCapitalizeNext()) {
-                        violetColor
-                    } else {
-                        keyColor
-                    }
+                    if (shift || capsLock || shouldCapitalizeNext()) violetColor else keyColor
                 ) {
                     handleShift()
                 }
@@ -836,38 +689,26 @@ class AntonInputMethodService : InputMethodService() {
                     displayLetter(key),
                     1f,
                     longPressAction = {
-                        val secondary = secondarySymbol(
-                            key.lowercase(Locale.ROOT)
-                        )
-
+                        val secondary = secondarySymbol(key.lowercase(Locale.ROOT))
                         if (secondary.isNotEmpty()) {
-                            currentInputConnection?.commitText(
-                                secondary,
-                                1
-                            )
-                            updateSuggestions()
+                            currentInputConnection?.commitText(secondary, 1)
+                            isSymbols = false
+                            refresh()
                         }
                     }
                 ) {
-                    if (
-                        isSymbols &&
-                        key in listOf(",", ".", "!", "?", ";", ":")
-                    ) {
+                    val wasSymbols = isSymbols
+                    if (wasSymbols && key in listOf(",", ".", "!", "?", ";", ":")) {
                         commitPunctuation(key)
                     } else {
-                        currentInputConnection?.commitText(
-                            displayLetter(key),
-                            1
-                        )
+                        currentInputConnection?.commitText(displayLetter(key), 1)
                     }
+                    if (wasSymbols) isSymbols = false
 
                     if (shift && !capsLock) {
                         shift = false
                     }
-
-                    // Не выходим из символьной раскладки после каждой цифры/знака.
-                    // Пользователь сам возвращается к буквам кнопкой ABC.
-                    if (!isSymbols) updateSuggestions()
+                    if (wasSymbols) refresh() else updateSuggestions()
                 }
             }
 
@@ -877,10 +718,7 @@ class AntonInputMethodService : InputMethodService() {
                     "⌫",
                     1.3f,
                     violetColor,
-                    repeatAction = {
-                        deleteBeforeCursor()
-                        updateSuggestions()
-                    }
+                    repeatAction = { deleteBeforeCursor(); updateSuggestions() }
                 ) {
                     deleteBeforeCursor()
                     updateSuggestions()
@@ -892,42 +730,29 @@ class AntonInputMethodService : InputMethodService() {
 
         val bottom = newRow()
 
-        addKey(
-            bottom,
-            if (isSymbols) "ABC" else "?123",
-            1.3f
-        ) {
+        addKey(bottom, if (isSymbols) "ABC" else "?123", 1.3f) {
             isSymbols = !isSymbols
             refresh()
         }
 
         addKey(bottom, ",", 0.8f) {
             commitPunctuation(",")
+            isSymbols = false
             refresh()
         }
 
-        addKey(
-            bottom,
-            if (isRussian) "Русский" else "English",
-            4f,
-            keyColor,
-            keyHeight = 44
-        ) {
+        addKey(bottom, if (isRussian) "Русский" else "English", 4f, keyColor, keyHeight = 44) {
             commitSpaceWithCorrection()
             refresh()
         }
 
         addKey(bottom, ".", 0.8f) {
             commitPunctuation(".")
+            isSymbols = false
             refresh()
         }
 
-        addKey(
-            bottom,
-            "↵",
-            1.2f,
-            violetColor
-        ) {
+        addKey(bottom, "↵", 1.2f, violetColor) {
             currentInputConnection?.commitText("\n", 1)
             refresh()
         }
@@ -937,49 +762,118 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun showSuggestions(root: LinearLayout) {
         val word = getCurrentWord()
-        val suggestions = getSuggestions(word)
+        if (word != requestedSpellWord) {
+            requestedSpellWord = word
+            systemSuggestions = emptyList()
+            requestSystemSpellCheck(word)
+        }
+        val suggestions = (getSuggestions(word) + systemSuggestions)
+            .distinctBy { it.lowercase(Locale.ROOT) }
+            .filter { !it.equals(word, ignoreCase = true) }
+            .take(5)
 
+        // Do not reserve an empty 20dp row: it creates a visible gap above the keys.
         if (suggestions.isEmpty()) return
 
         val row = newRow()
         suggestionsRow = row
-
         suggestions.forEach { suggestion ->
             addKey(row, suggestion, 1f, keyColor) {
                 replaceCurrentWord(suggestion)
                 updateSuggestions()
             }
         }
-
         root.addView(row)
     }
 
+    // Update only the suggestion strip; rebuilding the full keyboard on every
+    // keystroke can cause visible input lag on some devices.
     private fun updateSuggestions() {
         val root = keyboardRoot ?: return
-
         if (isSymbols || isEmoji || isAI || isSettings) return
 
+        val word = getCurrentWord()
+        if (word != requestedSpellWord) {
+            requestedSpellWord = word
+            systemSuggestions = emptyList()
+            requestSystemSpellCheck(word)
+        }
+        renderSuggestionRow(root)
+    }
+
+    private fun renderSuggestionRow(root: LinearLayout) {
         suggestionsRow?.let { oldRow ->
             root.removeView(oldRow)
             suggestionsRow = null
         }
 
         val word = getCurrentWord()
-        val suggestions = getSuggestions(word)
+        val suggestions = (getSuggestions(word) + systemSuggestions)
+            .distinctBy { it.lowercase(Locale.ROOT) }
+            .filter { !it.equals(word, ignoreCase = true) }
+            .take(5)
 
         if (suggestions.isEmpty()) return
 
         val row = newRow()
         suggestionsRow = row
-
         suggestions.forEach { suggestion ->
             addKey(row, suggestion, 1f, keyColor) {
                 replaceCurrentWord(suggestion)
+                systemSuggestions = emptyList()
+                requestedSpellWord = ""
                 updateSuggestions()
             }
         }
-
         root.addView(row, minOf(1, root.childCount))
+    }
+
+    private fun requestSystemSpellCheck(word: String) {
+        if (word.length < 3) return
+        try {
+            val locale = if (isRussian) Locale("ru") else Locale.US
+            if (spellCheckerSession == null || spellCheckerLocale != locale) {
+                spellCheckerSession?.close()
+                val manager = getSystemService(
+                    Context.TEXT_SERVICES_MANAGER_SERVICE
+                ) as? TextServicesManager ?: return
+                spellCheckerSession = manager.newSpellCheckerSession(
+                    null,
+                    locale,
+                    object : SpellCheckerSession.SpellCheckerSessionListener {
+                        override fun onGetSuggestions(results: Array<SuggestionsInfo>) {
+                            val currentWord = requestedSpellWord
+                            if (currentWord.isBlank()) return
+                            val found = mutableListOf<String>()
+                            results.forEach { info ->
+                                for (i in 0 until info.suggestionsCount) {
+                                    val candidate = info.getSuggestionAt(i)?.trim().orEmpty()
+                                    if (candidate.isNotEmpty() && !candidate.equals(currentWord, true)) {
+                                        found.add(candidate)
+                                    }
+                                }
+                            }
+                            systemSuggestions = found.distinctBy { it.lowercase(Locale.ROOT) }.take(5)
+                            keyboardRoot?.let { root ->
+                                if (!isSymbols && !isEmoji && !isAI && !isSettings && getCurrentWord() == currentWord) {
+                                    renderSuggestionRow(root)
+                                }
+                            }
+                        }
+
+                        override fun onGetSentenceSuggestions(results: Array<android.view.textservice.SentenceSuggestionsInfo>) {
+                            // Word-level suggestions are used by this keyboard.
+                        }
+                    },
+                    true
+                )
+                spellCheckerLocale = locale
+            }
+            spellCheckerSession?.getSuggestions(TextInfo(word), 5)
+        } catch (_: Exception) {
+            // Some Huawei builds do not expose a system spell checker.
+            // Built-in dictionaries and fuzzy matching remain available.
+        }
     }
 
     private fun getCurrentWord(): String {
@@ -996,52 +890,39 @@ class AntonInputMethodService : InputMethodService() {
         if (word.isBlank()) return emptyList()
 
         val normalized = word.lowercase(Locale.ROOT)
-        val dictionary = if (isRussian) russianWords else englishWords
+        val dictionary = if (isRussian) {
+            russianWords + extraRussianWords
+        } else {
+            englishWords + extraEnglishWords
+        }
         val results = mutableListOf<String>()
 
-        fun addCandidate(candidate: String) {
-            if (candidate.isBlank() ||
-                candidate.equals(normalized, ignoreCase = true) ||
-                results.any { it.equals(candidate, ignoreCase = true) }
-            ) return
-            results.add(candidate)
-        }
-
-        // Личные слова имеют приоритет и никогда не исправляются автоматически.
         personalWords
-            .filter {
-                it.lowercase(Locale.ROOT).startsWith(normalized) &&
-                    !it.equals(normalized, ignoreCase = true)
-            }
-            .forEach(::addCandidate)
+            .filter { it.lowercase(Locale.ROOT).startsWith(normalized) && !it.equals(normalized, ignoreCase = true) }
+            .forEach { if (it !in results) results.add(it) }
 
-        // Точные известные опечатки показываются как предложение.
-        corrections[normalized]?.let(::addCandidate)
+        corrections[normalized]?.let { if (it !in results) results.add(it) }
 
-        // Сначала наиболее естественные продолжения введённого префикса.
         dictionary
-            .filter {
-                it.startsWith(normalized) &&
-                    !it.equals(normalized, ignoreCase = true)
-            }
-            .sortedWith(compareBy<String> { it.length }.thenBy { it })
-            .forEach(::addCandidate)
+            .filter { it.startsWith(normalized) && !it.equals(normalized, ignoreCase = true) }
+            .sortedBy { it.length }
+            .forEach { if (it !in results) results.add(it) }
 
-        // Мягкий поиск опечаток: только одна ошибка для слов от 4 букв.
-        // Это даёт варианты, но само по себе не заменяет введённое слово.
-        if (normalized.length >= 4 && results.size < maxSuggestions) {
-            dictionary
-                .asSequence()
-                .filter { candidate ->
-                    candidate.length >= 4 &&
-                        editDistanceAtMostOne(normalized, candidate) &&
-                        !candidate.equals(normalized, ignoreCase = true)
+        // Fuzzy matching helps when one or two letters were mistyped.
+        if (results.size < 5 && normalized.length >= 4) {
+            val maxDistance = if (normalized.length >= 7) 2 else 1
+            dictionary.asSequence()
+                .distinct()
+                .filter { kotlin.math.abs(it.length - normalized.length) <= maxDistance }
+                .map { it to editDistance(normalized, it) }
+                .filter { it.second in 1..maxDistance }
+                .sortedWith(compareBy<Pair<String, Int>> { it.second }.thenBy { it.first.length })
+                .forEach { pair ->
+                    if (results.size < 5 && pair.first !in results) results.add(pair.first)
                 }
-                .sortedBy { it.length }
-                .forEach(::addCandidate)
         }
 
-        return results.take(maxSuggestions).map { suggestion ->
+        return results.take(5).map { suggestion ->
             if (word.firstOrNull()?.isUpperCase() == true) {
                 suggestion.replaceFirstChar { it.uppercase() }
             } else {
@@ -1050,34 +931,25 @@ class AntonInputMethodService : InputMethodService() {
         }
     }
 
-    private fun editDistanceAtMostOne(first: String, second: String): Boolean {
-        if (kotlin.math.abs(first.length - second.length) > 1) return false
-
-        var i = 0
-        var j = 0
-        var differences = 0
-
-        while (i < first.length && j < second.length) {
-            if (first[i] == second[j]) {
-                i++
-                j++
-            } else {
-                differences++
-                if (differences > 1) return false
-
-                when {
-                    first.length > second.length -> i++
-                    second.length > first.length -> j++
-                    else -> {
-                        i++
-                        j++
-                    }
-                }
+    private fun editDistance(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+        var previous = IntArray(b.length + 1) { it }
+        for (i in a.indices) {
+            val current = IntArray(b.length + 1)
+            current[0] = i + 1
+            for (j in b.indices) {
+                val cost = if (a[i] == b[j]) 0 else 1
+                current[j + 1] = minOf(
+                    current[j] + 1,
+                    previous[j + 1] + 1,
+                    previous[j] + cost
+                )
             }
+            previous = current
         }
-
-        if (i < first.length || j < second.length) differences++
-        return differences <= 1
+        return previous[b.length]
     }
 
     private fun replaceCurrentWord(suggestion: String) {
@@ -1093,9 +965,7 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun deleteBeforeCursor() {
         val connection = currentInputConnection ?: return
-
         val selected = connection.getSelectedText(0)
-
         if (!selected.isNullOrEmpty()) {
             connection.commitText("", 1)
         } else {
@@ -1105,54 +975,47 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun commitSpaceWithCorrection() {
         val connection = currentInputConnection ?: return
+        val before = connection.getTextBeforeCursor(2, 0)?.toString().orEmpty()
 
-        val before = connection
-            .getTextBeforeCursor(2, 0)
-            ?.toString()
-            .orEmpty()
-
+        // Do not accumulate spaces. A second consecutive space becomes ". ".
         if (before.endsWith(" ")) {
-            if (
-                autoPunctuationSpaceEnabled &&
-                before.length >= 2 &&
-                !before[before.length - 2].isWhitespace()
-            ) {
+            if (autoPunctuationSpaceEnabled && before.length >= 2 && !before[before.length - 2].isWhitespace()) {
                 val previous = before[before.length - 2]
-
                 if (previous in ".?!") return
 
                 connection.deleteSurroundingText(1, 0)
                 connection.commitText(". ", 1)
             }
-
             return
         }
 
         val word = getCurrentWord()
 
-        if (
-            autoCorrectionEnabled &&
-            word.isNotEmpty() &&
-            personalWords.none { it.equals(word, ignoreCase = true) }
-        ) {
-            // Автозамена только для точных, заранее известных опечаток.
-            // Не применяем fuzzy-замену автоматически, чтобы не портить имена.
-            val corrected = corrections[word.lowercase(Locale.ROOT)]
+        if (autoCorrectionEnabled && word.isNotEmpty() &&
+            personalWords.none { it.equals(word, ignoreCase = true) }) {
+            // Cautious mode: only correct a small allow-list of clear typos.
+            // Colloquialisms and stylistic variants remain suggestions, never auto-replacements.
+            val safeAutoCorrectionKeys = setOf(
+                "превет", "приветт", "спосибо", "спасибоо", "пожалуста",
+                "пажалуйста", "севодня", "сигодня", "завтро", "чево",
+                "чтобыы", "здравствуйтее", "извените", "извеняюсь",
+                "потаму", "пачему", "сабака", "teh", "adn", "recieve",
+                "becouse", "definately", "seperate", "thier", "wierd",
+                "freind", "langauge", "wich"
+            )
+            val normalizedWord = word.lowercase(Locale.ROOT)
+            val corrected = if (normalizedWord in safeAutoCorrectionKeys) {
+                corrections[normalizedWord]
+            } else null
 
             if (corrected != null) {
                 val result = if (word.first().isUpperCase()) {
-                    corrected.replaceFirstChar {
-                        it.uppercase()
-                    }
+                    corrected.replaceFirstChar { it.uppercase() }
                 } else {
                     corrected
                 }
 
-                connection.deleteSurroundingText(
-                    word.length,
-                    0
-                )
-
+                connection.deleteSurroundingText(word.length, 0)
                 connection.commitText(result, 1)
             }
         }
@@ -1162,12 +1025,9 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun commitPunctuation(symbol: String) {
         val connection = currentInputConnection ?: return
+        val before = connection.getTextBeforeCursor(1, 0)?.toString().orEmpty()
 
-        val before = connection
-            .getTextBeforeCursor(1, 0)
-            ?.toString()
-            .orEmpty()
-
+        // Replace a space before punctuation and add exactly one space after it.
         if (before == " ") {
             connection.deleteSurroundingText(1, 0)
         }
@@ -1181,16 +1041,13 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun shouldCapitalizeNext(): Boolean {
         if (!autoCapitalizationEnabled) return false
-
         val before = currentInputConnection
             ?.getTextBeforeCursor(64, 0)
             ?.toString()
             .orEmpty()
 
         val trimmed = before.trimEnd()
-
-        return trimmed.isEmpty() ||
-            trimmed.last() in ".?!\n"
+        return trimmed.isEmpty() || trimmed.last() in ".?!\n"
     }
 
     private fun displayLetter(letter: String): String {
@@ -1217,10 +1074,10 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun showEmoji(root: LinearLayout) {
         val emojis = listOf(
-            listOf("😀", "😂", "🤣", "😊", "😍", "🥰", "😎"),
-            listOf("😭", "😡", "🤔", "🙄", "😘", "🤗", "😴"),
-            listOf("❤️", "💙", "💜", "🔥", "👍", "👏", "🙏"),
-            listOf("🎉", "✨", "⭐", "🌹", "☀️", "🚀", "💯")
+            listOf("😀","😂","🤣","😊","😍","🥰","😎"),
+            listOf("😭","😡","🤔","🙄","😘","🤗","😴"),
+            listOf("❤️","💙","💜","🔥","👍","👏","🙏"),
+            listOf("🎉","✨","⭐","🌹","☀️","🚀","💯")
         )
 
         root.addView(createLabel("EMOJI"))
@@ -1233,8 +1090,6 @@ class AntonInputMethodService : InputMethodService() {
                     currentInputConnection?.commitText(emoji, 1)
                     isEmoji = false
                     isSymbols = false
-                    isAI = false
-                    isSettings = false
                     refresh()
                 }
             }
@@ -1254,11 +1109,10 @@ class AntonInputMethodService : InputMethodService() {
             "⌫",
             1f,
             violetColor,
-            repeatAction = {
-                deleteBeforeCursor()
-            }
+            repeatAction = { deleteBeforeCursor() }
         ) {
             deleteBeforeCursor()
+            isEmoji = false
             refresh()
         }
 
@@ -1267,38 +1121,20 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun showClipboard() {
         captureCurrentClipboard()
-
         val root = keyboardRoot ?: return
-
         root.removeAllViews()
-
         root.addView(createLabel("БУФЕР ОБМЕНА"))
 
         val controls = newRow()
-
-        addKey(
-            controls,
-            "Очистить всё",
-            1f,
-            violetColor,
-            keyHeight = 34
-        ) {
+        addKey(controls, "Очистить всё", 1f, violetColor, keyHeight = 34) {
             clearClipboardHistory()
-        }
-
-        addKey(
-            controls,
-            "Назад",
-            1f,
-            keyHeight = 34
-        ) {
-            isSettings = false
             isEmoji = false
-            isAI = false
             isSymbols = false
+            isAI = false
+            isSettings = false
             refresh()
         }
-
+        addKey(controls, "Назад", 1f, keyHeight = 34) { isSettings = false; refresh() }
         root.addView(controls)
 
         if (clipboardHistory.isEmpty()) {
@@ -1307,432 +1143,188 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         val scroll = ScrollView(this)
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         var tileRow: LinearLayout? = null
-
         clipboardHistory.forEachIndexed { index, item ->
             if (index % 2 == 0) {
                 tileRow = newRow()
                 content.addView(tileRow)
             }
-
-            val preview = item
-                .replace("\n", " ")
-                .take(58)
-
-            addTile(
-                tileRow!!,
-                "${index + 1}. $preview",
-                "Нажми, чтобы вставить",
-                false
-            ) {
+            val preview = item.replace("\n", " ").take(58)
+            addTile(tileRow!!, "${index + 1}. $preview", "Нажми, чтобы вставить", false) {
                 currentInputConnection?.commitText(item, 1)
                 isEmoji = false
+                isSymbols = false
                 isAI = false
                 isSettings = false
-                isSymbols = false
                 refresh()
-
-                Toast.makeText(
-                    this,
-                    "Текст вставлен",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(this, "Текст вставлен", Toast.LENGTH_SHORT).show()
             }
         }
-
         scroll.addView(content)
-
-        root.addView(
-            scroll,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
     private fun clearClipboardHistory() {
         clipboardHistory.clear()
         saveClipboardHistory()
-
         var cleared = false
-
         try {
-            val manager = getSystemService(
-                CLIPBOARD_SERVICE
-            ) as ClipboardManager
-
-            manager.setPrimaryClip(
-                ClipData.newPlainText("", "")
-            )
-
+            val manager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            manager.setPrimaryClip(ClipData.newPlainText("", ""))
             cleared = true
         } catch (_: Exception) {
             cleared = false
         }
-
-        isEmoji = false
-        isAI = false
-        isSettings = false
-        isSymbols = false
-        refresh()
-
+        showClipboard()
         Toast.makeText(
             this,
-            if (cleared) {
-                "История и системный буфер очищены"
-            } else {
-                "История очищена; системный буфер недоступен"
-            },
+            if (cleared) "История и системный буфер очищены" else "История очищена; системный буфер недоступен",
             Toast.LENGTH_LONG
         ).show()
     }
 
+    @Suppress("DEPRECATION")
     private fun showSettings() {
         val root = keyboardRoot ?: return
-
         root.removeAllViews()
-
-        root.addView(createLabel("НАСТРОЙКИ"))
+        root.addView(createSettingsLabel("НАСТРОЙКИ"))
 
         val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(createSettingsLabel("ФУНКЦИИ"))
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        content.addView(createLabel("ФУНКЦИИ"))
-
-        data class Toggle(
-            val title: String,
-            val enabled: Boolean,
-            val action: () -> Unit
-        )
-
+        data class Toggle(val title: String, val enabled: Boolean, val action: () -> Unit)
         val toggles = listOf(
-            Toggle(
-                "Автокоррекция",
-                autoCorrectionEnabled
-            ) {
-                autoCorrectionEnabled = !autoCorrectionEnabled
-            },
-
-            Toggle(
-                "Пробелы после знаков",
-                autoPunctuationSpaceEnabled
-            ) {
-                autoPunctuationSpaceEnabled =
-                    !autoPunctuationSpaceEnabled
-            },
-
-            Toggle(
-                "Автозаглавная",
-                autoCapitalizationEnabled
-            ) {
-                autoCapitalizationEnabled =
-                    !autoCapitalizationEnabled
-            }
+            Toggle("Автокоррекция", autoCorrectionEnabled) { autoCorrectionEnabled = !autoCorrectionEnabled },
+            Toggle("Пробелы после знаков", autoPunctuationSpaceEnabled) { autoPunctuationSpaceEnabled = !autoPunctuationSpaceEnabled },
+            Toggle("Автозаглавная", autoCapitalizationEnabled) { autoCapitalizationEnabled = !autoCapitalizationEnabled }
         )
-
         var toggleRow: LinearLayout? = null
-
         toggles.forEachIndexed { index, item ->
             if (index % 3 == 0) {
                 toggleRow = newRow()
                 content.addView(toggleRow)
             }
-
-            addTile(
-                toggleRow!!,
-                item.title,
-                if (item.enabled) "ВКЛ" else "ВЫКЛ",
-                item.enabled
-            ) {
+            addTile(toggleRow!!, item.title, if (item.enabled) "ВКЛ" else "ВЫКЛ", item.enabled) {
                 item.action()
                 saveKeyboardSettings()
                 showSettings()
             }
         }
 
-        content.addView(createLabel("ТЕМА КЛАВИАТУРЫ"))
-
+        content.addView(createSettingsLabel("ТЕМА КЛАВИАТУРЫ"))
         val themes = listOf(
-            Triple(
-                "Серая",
-                "gray",
-                Color.rgb(119, 124, 133)
-            ),
-            Triple(
-                "Тёмно-серая",
-                "dark_gray",
-                Color.rgb(47, 52, 61)
-            ),
-            Triple(
-                "Синяя",
-                "blue",
-                Color.rgb(20, 62, 112)
-            ),
-            Triple(
-                "Нежно-синяя",
-                "light_blue",
-                Color.rgb(190, 220, 242)
-            ),
-            Triple(
-                "Светло-зелёная",
-                "light_green",
-                Color.rgb(196, 222, 199)
-            ),
-            Triple(
-                "Стеклянная",
-                "glass",
-                Color.rgb(95, 130, 170)
-            ),
-            Triple(
-                "🎄 Новый год",
-                "new_year",
-                Color.rgb(17, 49, 82)
-            )
+            Triple("Серая", "gray", Color.rgb(119, 124, 133)),
+            Triple("Тёмно-серая", "dark_gray", Color.rgb(47, 52, 61)),
+            Triple("Синяя", "blue", Color.rgb(20, 62, 112)),
+            Triple("Нежно-синяя", "light_blue", Color.rgb(190, 220, 242)),
+            Triple("Светло-зелёная", "light_green", Color.rgb(196, 222, 199)),
+            Triple("Стеклянная", "glass", Color.rgb(95, 130, 170)),
+            Triple("🎄 Новый год", "new_year", Color.rgb(17, 49, 82)),
         )
-
         var themeRow: LinearLayout? = null
-
         themes.forEachIndexed { index, theme ->
             if (index % 3 == 0) {
                 themeRow = newRow()
                 content.addView(themeRow)
             }
-
-            addThemeTile(
-                themeRow!!,
-                theme.first,
-                theme.second,
-                theme.third
-            )
+            addThemeTile(themeRow!!, theme.first, theme.second, theme.third)
         }
 
-        // Раздел личного словаря скрыт.
-        // Сохранённые слова продолжают участвовать в подсказках.
+        // Personal dictionary is intentionally hidden from Settings UI.
+        // Existing personal words remain available to word suggestions.
 
-        content.addView(createLabel("О ПРИЛОЖЕНИИ"))
-        content.addView(
-            TextView(this).apply {
-                val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    packageManager.getPackageInfo(
-                        packageName,
-                        android.content.pm.PackageManager.PackageInfoFlags.of(0)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.getPackageInfo(packageName, 0)
-                }
-
-                val versionName = packageInfo.versionName ?: "неизвестно"
-                val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    packageInfo.longVersionCode
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageInfo.versionCode.toLong()
-                }
-
-                text = "Anton Keyboard  $versionName  ·  Build $versionCode"
-                textSize = 11f
-                setTextColor(textColorForTheme())
-                gravity = Gravity.CENTER
-                setPadding(dp(6), dp(4), dp(6), dp(8))
-            }
-        )
+        content.addView(createSettingsLabel("О ПРИЛОЖЕНИИ"))
+        val appInfo = try {
+            packageManager.getPackageInfo(packageName, 0)
+        } catch (_: Exception) {
+            null
+        }
+        val versionName = appInfo?.versionName?.takeIf { it.isNotBlank() } ?: "не указана"
+        val versionCode = if (appInfo == null) "—" else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            appInfo.longVersionCode.toString()
+        } else {
+            @Suppress("DEPRECATION")
+            appInfo.versionCode.toString()
+        }
+        content.addView(createSettingsLabel("Anton Keyboard  •  версия $versionName  •  сборка $versionCode"))
 
         scroll.addView(content)
-
-        root.addView(
-            scroll,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
-
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         val back = newRow()
-
-        addKey(
-            back,
-            "Готово",
-            1f,
-            accentColor,
-            keyHeight = 34
-        ) {
+        addKey(back, "Готово", 1f, accentColor, keyHeight = 34) {
             isSettings = false
             refresh()
         }
-
         root.addView(back)
     }
 
-    private fun addTile(
-        row: LinearLayout,
-        title: String,
-        subtitle: String,
-        selected: Boolean,
-        action: () -> Unit
-    ) {
+    private fun createSettingsLabel(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            textSize = 10f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(accentColor)
+            gravity = Gravity.CENTER
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+    }
+
+    private fun addTile(row: LinearLayout, title: String, subtitle: String, selected: Boolean, action: () -> Unit) {
         val tile = Button(this).apply {
             text = "$title\n$subtitle"
-            textSize = 9f
+            textSize = 7f
             isAllCaps = false
-
-            setTextColor(
-                if (selected) Color.WHITE
-                else textColorForTheme()
-            )
-
+            setTextColor(if (selected) Color.WHITE else textColorForTheme())
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-
             minHeight = 0
             minimumHeight = 0
-
-            setPadding(
-                dp(2),
-                dp(2),
-                dp(2),
-                dp(2)
-            )
-
-            background = rounded(
-                if (selected) violetColor else keyColor,
-                7
-            )
-
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            background = rounded(if (selected) violetColor else keyColor, 7)
             elevation = dp(1).toFloat()
-
-            setOnClickListener {
-                action()
-            }
+            setOnClickListener { action() }
         }
-
-        val params = LinearLayout.LayoutParams(
-            dp(58),
-            dp(58)
-        ).apply {
-            setMargins(
-                dp(3),
-                dp(3),
-                dp(3),
-                dp(3)
-            )
+        val params = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+            setMargins(dp(2), dp(2), dp(2), dp(2))
         }
-
         row.addView(tile, params)
     }
 
-    private fun addThemeTile(
-        row: LinearLayout,
-        label: String,
-        theme: String,
-        swatch: Int
-    ) {
+    private fun addThemeTile(row: LinearLayout, label: String, theme: String, swatch: Int) {
         val selected = selectedTheme == theme
-
         val tile = Button(this).apply {
             text = if (selected) "✓  $label" else label
-            textSize = 9f
+            textSize = 7f
             isAllCaps = false
-
-            setTextColor(
-                if (
-                    theme == "light_blue" ||
-                    theme == "light_green" ||
-                    theme == "gray"
-                ) {
-                    Color.rgb(25, 32, 42)
-                } else {
-                    Color.WHITE
-                }
-            )
-
+            setTextColor(if (theme == "light_blue" || theme == "light_green" || theme == "gray") Color.rgb(25, 32, 42) else Color.WHITE)
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-
             minHeight = 0
             minimumHeight = 0
-
-            background = rounded(
-                if (theme == "glass") {
-                    Color.argb(185, 95, 130, 170)
-                } else {
-                    swatch
-                },
-                7
-            )
-
-            setPadding(
-                dp(2),
-                dp(2),
-                dp(2),
-                dp(2)
-            )
-
-            setOnClickListener {
-                saveTheme(theme)
-            }
+            background = rounded(if (theme == "glass") Color.argb(185, 95, 130, 170) else swatch, 7)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            setOnClickListener { saveTheme(theme) }
         }
-
-        row.addView(
-            tile,
-            LinearLayout.LayoutParams(
-                dp(58),
-                dp(58)
-            ).apply {
-                setMargins(
-                    dp(3),
-                    dp(3),
-                    dp(3),
-                    dp(3)
-                )
-            }
-        )
+        row.addView(tile, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+            setMargins(dp(2), dp(2), dp(2), dp(2))
+        })
     }
 
     private fun textColorForTheme(): Int {
-        return if (
-            selectedTheme == "light_blue" ||
-            selectedTheme == "light_green" ||
-            selectedTheme == "gray"
-        ) {
-            Color.rgb(25, 32, 42)
-        } else {
-            Color.WHITE
-        }
+        return if (selectedTheme == "light_blue" || selectedTheme == "light_green" || selectedTheme == "gray") Color.rgb(25, 32, 42) else Color.WHITE
     }
 
     private fun showAI(root: LinearLayout) {
         root.addView(createLabel("✦ ПОМОЩНИК"))
 
         val info = TextView(this).apply {
-            text = """
-                Твой интеллектуальный помощник.
-
-                Для работы этих функций потребуется защищённый сервер.
-            """.trimIndent()
-
+            text = "Твой интеллектуальный помощник.\n\nДля работы этих функций потребуется защищённый сервер."
             textSize = 14f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-
-            setPadding(
-                dp(12),
-                dp(18),
-                dp(12),
-                dp(18)
-            )
-
+            setPadding(dp(12), dp(18), dp(12), dp(18))
             background = rounded(keyColor, 16)
         }
 
@@ -1746,21 +1338,16 @@ class AntonInputMethodService : InputMethodService() {
         ).forEach { label ->
             val row = newRow()
 
-            addKey(
-                row,
-                label,
-                1f,
-                violetColor
-            ) {
+            addKey(row, label, 1f, violetColor) {
                 Toast.makeText(
                     this,
                     "Эта функция появится в следующем обновлении",
                     Toast.LENGTH_SHORT
                 ).show()
                 isAI = false
+                isSymbols = false
                 isEmoji = false
                 isSettings = false
-                isSymbols = false
                 refresh()
             }
 
@@ -1769,12 +1356,7 @@ class AntonInputMethodService : InputMethodService() {
 
         val row = newRow()
 
-        addKey(
-            row,
-            "Назад к клавиатуре",
-            1f,
-            accentColor
-        ) {
+        addKey(row, "Назад к клавиатуре", 1f, accentColor) {
             isAI = false
             isSettings = false
             refresh()
@@ -1787,18 +1369,10 @@ class AntonInputMethodService : InputMethodService() {
         return TextView(this).apply {
             this.text = text
             textSize = 14f
-
             setTypeface(null, Typeface.BOLD)
             setTextColor(accentColor)
-
             gravity = Gravity.CENTER
-
-            setPadding(
-                dp(8),
-                dp(12),
-                dp(8),
-                dp(12)
-            )
+            setPadding(dp(8), dp(12), dp(8), dp(12))
         }
     }
 
@@ -1819,309 +1393,145 @@ class AntonInputMethodService : InputMethodService() {
         longPressAction: (() -> Unit)? = null,
         action: () -> Unit
     ) {
+        // Keep the main glyph in its own centered TextView. Secondary symbols
+        // are an independent top-right label, so they cannot shift the letter baseline.
         val keyFrame = FrameLayout(this)
-
         val button = Button(this).apply {
             text = label
-
             textSize = when {
-                label.length == 1 &&
-                    label[0].isLetter() -> 23f
-
+                label.length == 1 && label[0].isLetter() -> 23f
                 label.length > 6 -> 10f
-
                 else -> 16f
             }
-
             gravity = Gravity.CENTER
             includeFontPadding = false
             isAllCaps = false
-
-            setTextColor(
-                if (
-                    color == violetColor ||
-                    color == accentColor
-                ) {
-                    Color.WHITE
-                } else {
-                    textColorForTheme()
-                }
-            )
-
-            setTypeface(
-                Typeface.create(
-                    "sans-serif",
-                    Typeface.NORMAL
-                )
-            )
-
-            background = if (selectedTheme == "new_year") {
-                festiveKeyBackground(color)
-            } else {
-                rounded(color, 8)
-            }
-
+            setTextColor(if (color == violetColor || color == accentColor) Color.WHITE else textColorForTheme())
+            setTypeface(Typeface.create("sans-serif", Typeface.NORMAL))
+            background = if (selectedTheme == "new_year") festiveKeyBackground(color) else rounded(color, 8)
             elevation = dp(2).toFloat()
-
             minHeight = 0
             minimumHeight = 0
-
             isFocusable = false
             isSoundEffectsEnabled = false
-
-            setPadding(
-                dp(1),
-                0,
-                dp(1),
-                0
-            )
-
+            setPadding(dp(1), 0, dp(1), 0)
             stateListAnimator = null
 
-            if (
-                repeatAction == null &&
-                longPressAction == null
-            ) {
+            if (repeatAction == null && longPressAction == null) {
                 setOnTouchListener { view, event ->
                     if (event.action == MotionEvent.ACTION_DOWN) {
-                        view.performHapticFeedback(
-                            HapticFeedbackConstants.KEYBOARD_TAP
-                        )
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     }
-
                     false
                 }
-
-                setOnClickListener {
-                    action()
-                }
-
+                setOnClickListener { action() }
             } else if (repeatAction == null) {
                 val hapticView = this
                 val handler = Handler(Looper.getMainLooper())
-
                 var longPressed = false
-
                 val longPressTask = Runnable {
                     longPressed = true
-
-                    hapticView.performHapticFeedback(
-                        HapticFeedbackConstants.KEYBOARD_TAP
-                    )
-
+                    hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     longPressAction?.invoke()
                 }
-
                 setOnTouchListener { _, event ->
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
                             longPressed = false
-
-                            hapticView.performHapticFeedback(
-                                HapticFeedbackConstants.KEYBOARD_TAP
-                            )
-
-                            handler.postDelayed(
-                                longPressTask,
-                                450L
-                            )
-
+                            hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            handler.postDelayed(longPressTask, 450L)
                             true
                         }
-
                         MotionEvent.ACTION_UP -> {
                             handler.removeCallbacks(longPressTask)
-
-                            if (!longPressed) {
-                                action()
-                            }
-
+                            if (!longPressed) action()
                             true
                         }
-
-                        MotionEvent.ACTION_CANCEL,
-                        MotionEvent.ACTION_OUTSIDE -> {
+                        MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
                             handler.removeCallbacks(longPressTask)
                             true
                         }
-
                         else -> true
                     }
                 }
-
             } else {
                 val hapticView = this
                 val handler = Handler(Looper.getMainLooper())
-
                 var repeating = false
-
                 val repeatTask = object : Runnable {
                     override fun run() {
                         repeating = true
                         repeatAction()
-
-                        handler.postDelayed(
-                            this,
-                            55L
-                        )
+                        handler.postDelayed(this, 55L)
                     }
                 }
-
                 setOnTouchListener { _, event ->
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
                             repeating = false
-
-                            hapticView.performHapticFeedback(
-                                HapticFeedbackConstants.KEYBOARD_TAP
-                            )
-
-                            handler.postDelayed(
-                                repeatTask,
-                                350L
-                            )
-
+                            hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            handler.postDelayed(repeatTask, 350L)
                             true
                         }
-
                         MotionEvent.ACTION_UP -> {
                             handler.removeCallbacks(repeatTask)
-
-                            if (!repeating) {
-                                action()
-                            }
-
+                            if (!repeating) action()
                             true
                         }
-
-                        MotionEvent.ACTION_CANCEL,
-                        MotionEvent.ACTION_OUTSIDE -> {
+                        MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
                             handler.removeCallbacks(repeatTask)
                             true
                         }
-
                         else -> true
                     }
                 }
             }
         }
+        keyFrame.addView(button, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
 
-        keyFrame.addView(
-            button,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        if (
-            label.length == 1 &&
-            label[0].isLetter() &&
-            !isSymbols
-        ) {
-            val secondary = secondarySymbol(
-                label.lowercase(Locale.ROOT)
-            )
-
+        if (label.length == 1 && label[0].isLetter() && !isSymbols) {
+            val secondary = secondarySymbol(label.lowercase(Locale.ROOT))
             if (secondary.isNotEmpty()) {
                 val secondaryView = TextView(this).apply {
                     text = secondary
                     textSize = 9f
                     includeFontPadding = false
                     gravity = Gravity.CENTER
-
-                    setTextColor(
-                        if (selectedTheme == "new_year") {
-                            Color.rgb(220, 239, 255)
-                        } else {
-                            textColorForTheme()
-                        }
-                    )
-
-                    setTypeface(
-                        Typeface.create(
-                            "sans-serif-medium",
-                            Typeface.NORMAL
-                        )
-                    )
-
+                    setTextColor(if (selectedTheme == "new_year") Color.rgb(220, 239, 255) else textColorForTheme())
+                    setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
                     isClickable = false
                     isFocusable = false
                 }
-
-                val secondaryParams = FrameLayout.LayoutParams(
-                    dp(14),
-                    dp(13),
-                    Gravity.TOP or Gravity.END
-                ).apply {
+                val secondaryParams = FrameLayout.LayoutParams(dp(14), dp(13), Gravity.TOP or Gravity.END).apply {
                     topMargin = dp(3)
                     marginEnd = dp(4)
                 }
-
-                keyFrame.addView(
-                    secondaryView,
-                    secondaryParams
-                )
+                keyFrame.addView(secondaryView, secondaryParams)
             }
         }
 
-        val params = LinearLayout.LayoutParams(
-            0,
-            dp(keyHeight),
-            weight
-        ).apply {
-            setMargins(
-                dp(2),
-                dp(2),
-                dp(2),
-                dp(2)
-            )
+        val params = LinearLayout.LayoutParams(0, dp(keyHeight), weight).apply {
+            setMargins(dp(2), dp(2), dp(2), dp(2))
         }
-
         row.addView(keyFrame, params)
     }
 
     private fun secondarySymbol(letter: String): String {
         val symbols = mapOf(
-            "й" to "1",
-            "ц" to "2",
-            "у" to "3",
-            "к" to "4",
-            "е" to "5",
-            "н" to "6",
-            "г" to "7",
-            "ш" to "8",
-            "щ" to "9",
-            "з" to "0",
-            "х" to "-",
-            "ф" to "@",
-            "ы" to "#",
-            "в" to "₽",
-            "а" to "_",
-            "п" to "&",
-            "р" to "-",
-            "о" to "+",
-            "л" to "(",
-            "д" to ")",
-            "ж" to "/",
-            "э" to "~",
-            "я" to "*",
-            "ч" to "\"",
-            "с" to "€",
-            "м" to "£",
-            "и" to "¥",
-            "т" to "?",
-            "ь" to "!",
-            "б" to "%",
-            "ю" to ":"
+            "й" to "1", "ц" to "2", "у" to "3", "к" to "4", "е" to "5",
+            "н" to "6", "г" to "7", "ш" to "8", "щ" to "9", "з" to "0",
+            "х" to "-", "ф" to "@", "ы" to "#", "в" to "₽", "а" to "_",
+            "п" to "&", "р" to "-", "о" to "+", "л" to "(", "д" to ")",
+            "ж" to "/", "э" to "~", "я" to "*", "ч" to "\"", "с" to "€",
+            "м" to "£", "и" to "¥", "т" to "?", "ь" to "!", "б" to "%", "ю" to ":"
         )
-
         return symbols[letter] ?: ""
     }
 
-    private fun festiveKeyBackground(
-        color: Int
-    ): GradientDrawable {
+    private fun festiveKeyBackground(color: Int): GradientDrawable {
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(
@@ -2131,47 +1541,23 @@ class AntonInputMethodService : InputMethodService() {
             )
         ).apply {
             cornerRadius = dp(9).toFloat()
-            setStroke(
-                dp(1),
-                Color.argb(150, 137, 211, 255)
-            )
+            setStroke(dp(1), Color.argb(150, 137, 211, 255))
         }
     }
 
-    private fun lighten(
-        color: Int,
-        factor: Float
-    ): Int {
-        return Color.rgb(
-            (Color.red(color) * factor)
-                .toInt()
-                .coerceAtMost(255),
+    private fun lighten(color: Int, factor: Float): Int = Color.rgb(
+        (Color.red(color) * factor).toInt().coerceAtMost(255),
+        (Color.green(color) * factor).toInt().coerceAtMost(255),
+        (Color.blue(color) * factor).toInt().coerceAtMost(255)
+    )
 
-            (Color.green(color) * factor)
-                .toInt()
-                .coerceAtMost(255),
+    private fun darken(color: Int, factor: Float): Int = Color.rgb(
+        (Color.red(color) * factor).toInt(),
+        (Color.green(color) * factor).toInt(),
+        (Color.blue(color) * factor).toInt()
+    )
 
-            (Color.blue(color) * factor)
-                .toInt()
-                .coerceAtMost(255)
-        )
-    }
-
-    private fun darken(
-        color: Int,
-        factor: Float
-    ): Int {
-        return Color.rgb(
-            (Color.red(color) * factor).toInt(),
-            (Color.green(color) * factor).toInt(),
-            (Color.blue(color) * factor).toInt()
-        )
-    }
-
-    private fun rounded(
-        color: Int,
-        radius: Int
-    ): GradientDrawable {
+    private fun rounded(color: Int, radius: Int): GradientDrawable {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(radius).toFloat()
@@ -2179,14 +1565,10 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun refresh() {
-        keyboardRoot?.let {
-            renderKeyboard(it)
-        }
+        keyboardRoot?.let { renderKeyboard(it) }
     }
 
     private fun dp(value: Int): Int {
-        return (
-            value * resources.displayMetrics.density
-        ).toInt()
+        return (value * resources.displayMetrics.density).toInt()
     }
 }
