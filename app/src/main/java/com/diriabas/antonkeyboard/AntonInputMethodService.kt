@@ -991,7 +991,9 @@ class AntonInputMethodService : InputMethodService() {
             connection.deleteSurroundingText(word.length, 0)
         }
 
-        connection.commitText(suggestion, 1)
+        // Accepting a suggestion completes the word and inserts one trailing space,
+        // so the user can immediately continue typing the next word.
+        connection.commitText("$suggestion ", 1)
     }
 
     private fun deleteBeforeCursor() {
