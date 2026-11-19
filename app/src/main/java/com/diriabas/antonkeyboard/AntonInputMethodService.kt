@@ -1,3 +1,4 @@
+
 package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
@@ -10,6 +11,10 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
+import android.text.style.SuperscriptSpan
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.os.Build
@@ -212,10 +217,10 @@ class AntonInputMethodService : InputMethodService() {
                 violetColor = Color.rgb(157, 165, 178)
             }
             "dark_gray" -> {
-                backgroundColor = Color.rgb(25, 28, 34)
-                keyColor = Color.rgb(47, 52, 61)
-                accentColor = Color.rgb(185, 194, 207)
-                violetColor = Color.rgb(105, 115, 132)
+                backgroundColor = Color.rgb(35, 38, 42)
+                keyColor = Color.rgb(68, 72, 77)
+                accentColor = Color.rgb(205, 210, 216)
+                violetColor = Color.rgb(91, 145, 238)
             }
             "blue" -> {
                 backgroundColor = Color.rgb(8, 31, 66)
@@ -448,6 +453,17 @@ class AntonInputMethodService : InputMethodService() {
             )
         }
 
+        if (!isSymbols) {
+            val numberRow = newRow()
+            listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").forEach { number ->
+                addKey(numberRow, number, 1f, keyHeight = 43) {
+                    currentInputConnection?.commitText(number, 1)
+                    updateSuggestions()
+                }
+            }
+            root.addView(numberRow)
+        }
+
         rows.forEachIndexed { index, keys ->
             val row = newRow()
 
@@ -505,7 +521,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(bottom, "", 4f, keyColor) {
+        addKey(bottom, if (isRussian) "Русский" else "English", 4f, keyColor, keyHeight = 48) {
             commitSpaceWithCorrection()
             refresh()
         }
@@ -1014,23 +1030,36 @@ class AntonInputMethodService : InputMethodService() {
         label: String,
         weight: Float,
         color: Int = keyColor,
-        keyHeight: Int = 42,
+        keyHeight: Int = 49,
         repeatAction: (() -> Unit)? = null,
         action: () -> Unit
     ) {
         val button = Button(this).apply {
             text = label
-            textSize = 14f
+            textSize = when {
+                label.length == 1 && label[0].isLetter() -> 25f
+                label.length > 6 -> 11f
+                else -> 17f
+            }
             isAllCaps = false
+            if (label.length == 1 && label[0].isLetter() && !isSymbols) {
+                val secondary = secondarySymbol(label.lowercase(Locale.ROOT))
+                if (secondary.isNotEmpty()) {
+                    val decorated = SpannableString(label + secondary)
+                    decorated.setSpan(RelativeSizeSpan(0.42f), 1, decorated.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    decorated.setSpan(SuperscriptSpan(), 1, decorated.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    text = decorated
+                }
+            }
             setTextColor(if (color == violetColor || color == accentColor) Color.WHITE else textColorForTheme())
-            setTypeface(null, Typeface.BOLD)
-            background = rounded(color, 12)
+            setTypeface(Typeface.create("sans-serif", Typeface.NORMAL))
+            background = rounded(color, 8)
             elevation = dp(2).toFloat()
             minHeight = 0
             minimumHeight = 0
             isFocusable = false
             isSoundEffectsEnabled = false
-            setPadding(dp(2), 0, dp(2), 0)
+            setPadding(dp(1), 0, dp(1), 0)
 
             if (repeatAction == null) {
                 setOnTouchListener { view, event ->
@@ -1085,6 +1114,18 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         row.addView(button, params)
+    }
+
+    private fun secondarySymbol(letter: String): String {
+        val symbols = mapOf(
+            "й" to "1", "ц" to "2", "у" to "3", "к" to "4", "е" to "5",
+            "н" to "6", "г" to "7", "ш" to "8", "щ" to "9", "з" to "0",
+            "х" to "-", "ф" to "@", "ы" to "#", "в" to "₽", "а" to "_",
+            "п" to "&", "р" to "-", "о" to "+", "л" to "(", "д" to ")",
+            "ж" to "/", "э" to "~", "я" to "*", "ч" to "\"", "с" to "€",
+            "м" to "£", "и" to "¥", "т" to "?", "ь" to "!", "б" to "%", "ю" to ":"
+        )
+        return symbols[letter] ?: ""
     }
 
     private fun rounded(color: Int, radius: Int): GradientDrawable {
