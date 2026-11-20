@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.res.Configuration
 import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Canvas
@@ -224,20 +223,14 @@ class AntonInputMethodService : InputMethodService() {
         loadTheme()
     }
 
+    // Do not switch to Android's fullscreen extract editor in landscape.
+    // That mode can replace or hide the app's own text-entry field while the IME is open.
+    override fun onEvaluateFullscreenMode(): Boolean = false
+
     override fun onDestroy() {
         spellCheckerSession?.close()
         spellCheckerSession = null
         super.onDestroy()
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        // Rebuild the keyboard with landscape-specific dimensions after rotation.
-        keyboardRoot?.post { refresh() }
-    }
-
-    private fun isLandscapeMode(): Boolean {
-        return resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
 
     override fun onCreateInputView(): View {
@@ -257,7 +250,7 @@ class AntonInputMethodService : InputMethodService() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(5), 0, dp(5), dp(if (isLandscapeMode()) 2 else 6))
+            setPadding(dp(5), 0, dp(5), dp(6))
             setBackgroundColor(backgroundColor)
         }
 
@@ -270,7 +263,7 @@ class AntonInputMethodService : InputMethodService() {
                 insets.systemWindowInsetBottom
             }
             val safeBottom = maxOf(dp(6), navigationBarBottom)
-            view.setPadding(dp(5), 0, dp(5), maxOf(dp(if (isLandscapeMode()) 2 else 6), navigationBarBottom))
+            view.setPadding(dp(5), 0, dp(5), safeBottom)
             insets
         }
         root.requestApplyInsets()
@@ -553,7 +546,7 @@ class AntonInputMethodService : InputMethodService() {
         // Compact shortcut strip: no branding or language badge.
         val toolbar = newRow()
 
-        addKey(toolbar, "😊", 1f, keyColor, keyHeight = if (isLandscapeMode()) 21 else 28) {
+        addKey(toolbar, "😊", 1f, keyColor, keyHeight = 28) {
             isEmoji = !isEmoji
             isAI = false
             isSettings = false
@@ -561,14 +554,14 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "📋", 1f, keyColor, keyHeight = if (isLandscapeMode()) 21 else 28) {
+        addKey(toolbar, "📋", 1f, keyColor, keyHeight = 28) {
             isEmoji = false
             isAI = false
             isSettings = false
             showClipboard()
         }
 
-        addKey(toolbar, "✦", 1f, violetColor, keyHeight = if (isLandscapeMode()) 21 else 28) {
+        addKey(toolbar, "✦", 1f, violetColor, keyHeight = 28) {
             isAI = !isAI
             isEmoji = false
             isSettings = false
@@ -576,7 +569,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "🌐", 1f, keyColor, keyHeight = if (isLandscapeMode()) 21 else 28) {
+        addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 28) {
             isRussian = !isRussian
             isSymbols = false
             isEmoji = false
@@ -585,7 +578,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(toolbar, "⚙", 0.72f, keyColor, keyHeight = if (isLandscapeMode()) 21 else 28) {
+        addKey(toolbar, "⚙", 0.72f, keyColor, keyHeight = 28) {
             isSettings = !isSettings
             isEmoji = false
             isAI = false
@@ -607,7 +600,7 @@ class AntonInputMethodService : InputMethodService() {
         // A real animated decoration view: a curved string of colorful lights
         // and independently falling snowflakes. Animation stops when detached.
         root.addView(ChristmasDecorationView(this), LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(if (isLandscapeMode()) 20 else 54)
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
         ))
     }
 
@@ -810,7 +803,7 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        addKey(bottom, if (isRussian) "Русский" else "English", 4f, keyColor, keyHeight = if (isLandscapeMode()) 32 else 44) {
+        addKey(bottom, if (isRussian) "Русский" else "English", 4f, keyColor, keyHeight = 44) {
             commitSpaceWithCorrection()
             refresh()
         }
@@ -1376,7 +1369,7 @@ class AntonInputMethodService : InputMethodService() {
             setOnClickListener { action() }
         }
         val params = LinearLayout.LayoutParams(0, dp(34), 1f).apply {
-            setMargins(dp(if (isLandscapeMode()) 1 else 2), dp(if (isLandscapeMode()) 1 else 2), dp(if (isLandscapeMode()) 1 else 2), dp(if (isLandscapeMode()) 1 else 2))
+            setMargins(dp(2), dp(2), dp(2), dp(2))
         }
         row.addView(tile, params)
     }
@@ -1481,7 +1474,7 @@ class AntonInputMethodService : InputMethodService() {
         label: String,
         weight: Float,
         color: Int = keyColor,
-        keyHeight: Int = if (isLandscapeMode()) 32 else 44,
+        keyHeight: Int = 44,
         repeatAction: (() -> Unit)? = null,
         longPressAction: (() -> Unit)? = null,
         action: () -> Unit
@@ -1492,7 +1485,7 @@ class AntonInputMethodService : InputMethodService() {
         val button = Button(this).apply {
             text = label
             textSize = when {
-                label.length == 1 && label[0].isLetter() -> if (isLandscapeMode()) 19f else 23f
+                label.length == 1 && label[0].isLetter() -> 23f
                 label.length > 6 -> 10f
                 else -> 16f
             }
