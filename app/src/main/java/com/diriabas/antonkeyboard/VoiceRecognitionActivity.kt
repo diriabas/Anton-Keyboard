@@ -14,15 +14,13 @@ import android.widget.Toast
 class VoiceRecognitionActivity : Activity() {
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var voiceLanguage: String = "ru-RU"
+    private var voiceLanguage = "ru-RU"
     private var resultSent = false
 
     companion object {
         private const val REQUEST_RECORD_AUDIO = 1001
-
         private const val ACTION_VOICE_RESULT =
             "com.diriabas.antonkeyboard.VOICE_RESULT"
-
         private const val EXTRA_VOICE_TEXT = "voice_text"
         private const val EXTRA_VOICE_LANGUAGE = "voice_language"
     }
@@ -71,9 +69,7 @@ class VoiceRecognitionActivity : Activity() {
 
     private fun startVoiceRecognition() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            showMessage(
-                "На устройстве нет сервиса распознавания речи"
-            )
+            showMessage("Сервис распознавания речи не найден")
             finish()
             return
         }
@@ -174,9 +170,7 @@ class VoiceRecognitionActivity : Activity() {
             speechRecognizer?.startListening(recognitionIntent)
 
         } catch (e: Exception) {
-            showMessage(
-                "Не удалось запустить распознавание речи"
-            )
+            showMessage("Не удалось запустить распознавание речи")
             finish()
         }
     }
@@ -187,14 +181,9 @@ class VoiceRecognitionActivity : Activity() {
         resultSent = true
 
         val resultIntent = Intent()
-
         resultIntent.action = ACTION_VOICE_RESULT
         resultIntent.setPackage(packageName)
-
-        resultIntent.putExtra(
-            EXTRA_VOICE_TEXT,
-            recognizedText
-        )
+        resultIntent.putExtra(EXTRA_VOICE_TEXT, recognizedText)
 
         sendBroadcast(resultIntent)
     }
@@ -233,14 +222,12 @@ class VoiceRecognitionActivity : Activity() {
         }
     }
 
-    private fun sendResult(recognizedText: String) {
-    if (resultSent) return
-
-    resultSent = true
-
-    val resultIntent = Intent()
-    resultIntent.action = ACTION_VOICE_RESULT
-    resultIntent.setPackage(packageName)
+    private fun showMessage(message: String) {
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     override fun onDestroy() {
@@ -250,7 +237,6 @@ class VoiceRecognitionActivity : Activity() {
         }
 
         speechRecognizer = null
-
         super.onDestroy()
     }
 }
