@@ -364,7 +364,25 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun loadTheme() {
         val prefs = getSharedPreferences("anton_keyboard", Context.MODE_PRIVATE)
-        selectedTheme = prefs.getString("keyboard_theme", "dark_gray") ?: "dark_gray"
+
+        // Klavio Neon is the default only when no theme has ever been selected.
+        // An existing user choice (for example, gray or dark_gray) is preserved.
+        val savedTheme = prefs.getString("keyboard_theme", null)
+        // Move the previous gray default to Klavio Neon once; other saved
+        // theme choices remain untouched.
+        selectedTheme = if (savedTheme == null || savedTheme == "gray") {
+            "klavio_neon"
+        } else {
+            savedTheme
+        }
+        if (selectedTheme !in setOf(
+                "klavio_neon", "gray", "dark_gray", "blue",
+                "light_blue", "light_green", "glass", "new_year"
+            )
+        ) {
+            selectedTheme = "klavio_neon"
+        }
+
         glassTheme = selectedTheme == "glass"
         applyThemeColors()
     }
@@ -383,6 +401,13 @@ class AntonInputMethodService : InputMethodService() {
 
     private fun applyThemeColors() {
         when (selectedTheme) {
+            "klavio_neon" -> {
+                // Deep navy base with electric cyan and vivid blue accents.
+                backgroundColor = Color.rgb(9, 13, 29)
+                keyColor = Color.rgb(20, 43, 82)
+                accentColor = Color.rgb(55, 220, 255)
+                violetColor = Color.rgb(48, 119, 255)
+            }
             "gray" -> {
                 backgroundColor = Color.rgb(92, 96, 104)
                 keyColor = Color.rgb(119, 124, 133)
@@ -1379,6 +1404,7 @@ class AntonInputMethodService : InputMethodService() {
 
         content.addView(createSettingsLabel("ТЕМА КЛАВИАТУРЫ"))
         val themes = listOf(
+            Triple("Klavio Neon", "klavio_neon", Color.rgb(20, 43, 82)),
             Triple("Серая", "gray", Color.rgb(119, 124, 133)),
             Triple("Тёмно-серая", "dark_gray", Color.rgb(47, 52, 61)),
             Triple("Синяя", "blue", Color.rgb(20, 62, 112)),
@@ -1573,7 +1599,11 @@ class AntonInputMethodService : InputMethodService() {
             isAllCaps = false
             setTextColor(if (color == violetColor || color == accentColor) Color.WHITE else textColorForTheme())
             setTypeface(Typeface.create("sans-serif", Typeface.NORMAL))
-            background = if (selectedTheme == "new_year") festiveKeyBackground(color) else rounded(color, 8)
+            background = when (selectedTheme) {
+                "new_year" -> festiveKeyBackground(color)
+                "klavio_neon" -> neonKeyBackground(color)
+                else -> rounded(color, 8)
+            }
             elevation = dp(2).toFloat()
             minHeight = 0
             minimumHeight = 0
@@ -1694,6 +1724,20 @@ class AntonInputMethodService : InputMethodService() {
             "м" to "£", "и" to "¥", "т" to "?", "ь" to "!", "б" to "%", "ю" to ":"
         )
         return symbols[letter] ?: ""
+    }
+
+    private fun neonKeyBackground(color: Int): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                lighten(color, 1.28f),
+                color,
+                darken(color, 0.72f)
+            )
+        ).apply {
+            cornerRadius = dp(9).toFloat()
+            setStroke(dp(1), Color.argb(220, 45, 205, 255))
+        }
     }
 
     private fun festiveKeyBackground(color: Int): GradientDrawable {
