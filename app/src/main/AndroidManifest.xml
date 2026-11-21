@@ -10,7 +10,7 @@
     </queries>
 
     <application
-        android:label="Anton Keyboard"
+        android:label="Klavio"
         android:allowBackup="false"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
@@ -23,7 +23,7 @@
 
         <service
             android:name=".AntonInputMethodService"
-            android:label="Anton Keyboard"
+            android:label="Klavio"
             android:permission="android.permission.BIND_INPUT_METHOD"
             android:exported="true">
 
