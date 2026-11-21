@@ -91,7 +91,7 @@ class VoiceRecognitionActivity : Activity() {
 
             speechRecognizer = if (googleService != null) {
                 selectedServiceLabel =
-                    "${googleService.packageName}/${googleService.name}"
+                    "${googleService.packageName}/${googleService.className}"
                 SpeechRecognizer.createSpeechRecognizer(this, googleService)
             } else {
                 selectedServiceLabel = "системный сервис (Google-служба не найдена)"
