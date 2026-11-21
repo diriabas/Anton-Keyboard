@@ -1,3 +1,4 @@
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +12,9 @@ android {
         applicationId = "com.diriabas.antonkeyboard"
         minSdk = 23
         targetSdk = 35
-        versionCode = 77
-        versionName = "0.10.1"
+
+        versionCode = 78
+        versionName = "0.10.2"
     }
 
     compileOptions {
