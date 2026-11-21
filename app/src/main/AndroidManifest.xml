@@ -2,10 +2,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Разрешение на использование микрофона -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Разрешаем приложению находить сервис распознавания речи -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
@@ -18,14 +16,12 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- Окно голосового ввода -->
         <activity
             android:name=".VoiceRecognitionActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <!-- Основная служба клавиатуры -->
         <service
             android:name=".AntonInputMethodService"
             android:label="Anton Keyboard"
