@@ -2,12 +2,14 @@ package com.diriabas.antonkeyboard
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.os.Bundle
-import android.speech.RecognitionListener
 import android.speech.RecognitionService
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.widget.Toast
@@ -20,15 +22,18 @@ class VoiceRecognitionActivity : Activity() {
     private var recognitionStarted = false
     private var selectedServiceLabel = "системный сервис"
 
+    private data class RecognitionProvider(
+        val component: ComponentName,
+        val label: String,
+        val packageName: String
+    )
+
     companion object {
         private const val REQUEST_RECORD_AUDIO = 1001
         private const val ACTION_VOICE_RESULT =
             "com.diriabas.antonkeyboard.VOICE_RESULT"
         private const val EXTRA_VOICE_TEXT = "voice_text"
         private const val EXTRA_VOICE_LANGUAGE = "voice_language"
-
-        // ERROR_TOO_MANY_REQUESTS имеет значение 10.
-        // Число используется напрямую для совместимости с разными compileSdk.
         private const val ERROR_TOO_MANY_REQUESTS_CODE = 10
     }
 
@@ -47,7 +52,7 @@ class VoiceRecognitionActivity : Activity() {
                 REQUEST_RECORD_AUDIO
             )
         } else {
-            startVoiceRecognition()
+            showAvailableProvidersAndStart()
         }
     }
 
@@ -63,7 +68,7 @@ class VoiceRecognitionActivity : Activity() {
         if (grantResults.isNotEmpty() &&
             grantResults[0] == PackageManager.PERMISSION_GRANTED
         ) {
-            startVoiceRecognition()
+            showAvailableProvidersAndStart()
         } else {
             showMessage(
                 "Нет разрешения на микрофон. Разреши доступ в настройках приложения."
@@ -72,29 +77,91 @@ class VoiceRecognitionActivity : Activity() {
         }
     }
 
-    private fun startVoiceRecognition() {
-        if (recognitionStarted || isFinishing) return
+    private fun findRecognitionProviders(): List<RecognitionProvider> {
+        return try {
+            val queryIntent = Intent(RecognitionService.SERVICE_INTERFACE)
+            val resolved: List<ResolveInfo> =
+                packageManager.queryIntentServices(queryIntent, 0)
+
+            resolved.mapNotNull { item ->
+                val info = item.serviceInfo ?: return@mapNotNull null
+                if (!info.enabled || !info.exported) return@mapNotNull null
+
+                val component = ComponentName(info.packageName, info.name)
+                val label = try {
+                    info.loadLabel(packageManager)?.toString()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: info.name
+                } catch (_: Exception) {
+                    info.name
+                }
+
+                RecognitionProvider(
+                    component = component,
+                    label = label,
+                    packageName = info.packageName
+                )
+            }.distinctBy { it.component.flattenToString() }
+                .sortedWith(
+                    compareBy<RecognitionProvider>(
+                        { if (it.packageName.contains("google", true)) 0 else 1 },
+                        { it.label.lowercase() }
+                    )
+                )
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun showAvailableProvidersAndStart() {
+        if (isFinishing) return
 
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             showMessage(
-                "На устройстве не найден сервис распознавания речи. " +
-                    "Проверь настройки голосового ввода."
+                "Android не сообщает о доступном сервисе распознавания речи."
             )
             finish()
             return
         }
 
+        val providers = findRecognitionProviders()
+
+        if (providers.isEmpty()) {
+            selectedServiceLabel = "системный сервис (службы не обнаружены через PackageManager)"
+            startRecognition(null)
+            return
+        }
+
+        val entries = providers.map {
+            "${it.label}\n${it.packageName}\n${it.component.className}"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Найденные службы распознавания")
+            .setMessage(
+                "Выбери службу для проверки. Если не уверен, выбери Google " +
+                    "или первый доступный вариант."
+            )
+            .setItems(entries) { _, which ->
+                val provider = providers[which]
+                selectedServiceLabel =
+                    "${provider.label} (${provider.packageName})"
+                startRecognition(provider.component)
+            }
+            .setOnCancelListener {
+                finish()
+            }
+            .show()
+    }
+
+    private fun startRecognition(service: ComponentName?) {
+        if (recognitionStarted || isFinishing) return
         recognitionStarted = true
 
         try {
-            val googleService = findGoogleRecognitionService()
-
-            speechRecognizer = if (googleService != null) {
-                selectedServiceLabel =
-                    "${googleService.packageName}/${googleService.className}"
-                SpeechRecognizer.createSpeechRecognizer(this, googleService)
+            speechRecognizer = if (service != null) {
+                SpeechRecognizer.createSpeechRecognizer(this, service)
             } else {
-                selectedServiceLabel = "системный сервис (Google-служба не найдена)"
                 SpeechRecognizer.createSpeechRecognizer(this)
             }
 
@@ -127,57 +194,14 @@ class VoiceRecognitionActivity : Activity() {
                 return
             }
 
-            showMessage(
-                if (googleService != null) {
-                    "Проверка голосового ввода: используется служба Google."
-                } else {
-                    "Служба Google не найдена. Используется системный распознаватель."
-                }
-            )
-
             speechRecognizer?.startListening(recognitionIntent)
 
         } catch (e: Exception) {
             val details = e.localizedMessage
                 ?.takeIf { it.isNotBlank() }
                 ?: e.javaClass.simpleName
-
             showMessage("Не удалось запустить голосовой ввод: $details")
             finish()
-        }
-    }
-
-    /**
-     * Ищет именно RecognitionService Google.
-     * Сначала предпочитается стандартный пакет приложения Google,
-     * затем любая другая служба, в имени пакета которой есть google.
-     */
-    private fun findGoogleRecognitionService(): ComponentName? {
-        return try {
-            val queryIntent = Intent(RecognitionService.SERVICE_INTERFACE)
-            val services = packageManager.queryIntentServices(queryIntent, 0)
-
-            val googleService = services
-                .mapNotNull { resolveInfo ->
-                    val serviceInfo = resolveInfo.serviceInfo ?: return@mapNotNull null
-                    if (!serviceInfo.enabled || !serviceInfo.exported) {
-                        return@mapNotNull null
-                    }
-                    if (!serviceInfo.packageName.contains("google", ignoreCase = true)) {
-                        return@mapNotNull null
-                    }
-
-                    ComponentName(serviceInfo.packageName, serviceInfo.name)
-                }
-                .distinct()
-                .sortedBy {
-                    if (it.packageName == "com.google.android.googlequicksearchbox") 0 else 1
-                }
-                .firstOrNull()
-
-            googleService
-        } catch (_: Exception) {
-            null
         }
     }
 
@@ -200,9 +224,7 @@ class VoiceRecognitionActivity : Activity() {
             override fun onEndOfSpeech() {}
 
             override fun onError(error: Int) {
-                if (!resultSent) {
-                    showMessage(getErrorMessage(error))
-                }
+                if (!resultSent) showMessage(getErrorMessage(error))
                 finish()
             }
 
@@ -210,18 +232,13 @@ class VoiceRecognitionActivity : Activity() {
                 val matches = results?.getStringArrayList(
                     SpeechRecognizer.RESULTS_RECOGNITION
                 )
-
-                val recognizedText = matches
-                    ?.firstOrNull()
-                    ?.trim()
-                    .orEmpty()
+                val recognizedText = matches?.firstOrNull()?.trim().orEmpty()
 
                 if (recognizedText.isNotEmpty()) {
                     sendResult(recognizedText)
                 } else {
                     showMessage("Речь не распознана. Попробуй ещё раз.")
                 }
-
                 finish()
             }
 
@@ -238,7 +255,6 @@ class VoiceRecognitionActivity : Activity() {
             setPackage(packageName)
             putExtra(EXTRA_VOICE_TEXT, recognizedText)
         }
-
         sendBroadcast(resultIntent)
     }
 
@@ -246,39 +262,29 @@ class VoiceRecognitionActivity : Activity() {
         return when (error) {
             SpeechRecognizer.ERROR_AUDIO ->
                 "Ошибка микрофона или записи звука."
-
             SpeechRecognizer.ERROR_CLIENT ->
-                "Сервис распознавания прервал запуск. Попробуй ещё раз."
-
+                "Сервис распознавания прервал запуск."
             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
                 "Нет разрешения на использование микрофона."
-
             SpeechRecognizer.ERROR_NETWORK ->
                 "Не удалось подключиться к сервису распознавания. Проверь интернет."
-
             SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
                 "Сервис распознавания не ответил вовремя. Проверь интернет."
-
             SpeechRecognizer.ERROR_NO_MATCH ->
                 "Не удалось разобрать речь. Скажи фразу ещё раз."
-
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
                 "Распознавание уже занято. Подожди немного и повтори."
-
             SpeechRecognizer.ERROR_SERVER ->
                 "Сервис распознавания вернул ошибку."
-
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                 "Не услышал речь. Начни говорить сразу после сигнала."
-
             ERROR_TOO_MANY_REQUESTS_CODE ->
-                "Google-сервис ограничил число запросов (код 10). " +
-                    "Подожди 30–60 секунд и попробуй один раз. " +
-                    "Выбранная служба: $selectedServiceLabel"
-
+                "Сервис распознавания отклонил запросы как слишком частые " +
+                    "(код 10). Выбранная служба: $selectedServiceLabel. " +
+                    "Подожди минуту и попробуй один раз."
             else ->
                 "Ошибка распознавания речи (код $error). " +
-                    "Служба: $selectedServiceLabel"
+                    "Выбранная служба: $selectedServiceLabel"
         }
     }
 
@@ -292,7 +298,6 @@ class VoiceRecognitionActivity : Activity() {
             speechRecognizer?.destroy()
         } catch (_: Exception) {
         }
-
         speechRecognizer = null
         super.onDestroy()
     }
