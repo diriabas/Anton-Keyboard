@@ -9,192 +9,38 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.view.Gravity
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 
 class VoiceRecognitionActivity : Activity() {
 
-    companion object {
-        const val EXTRA_LANGUAGE = "voice_language"
-        const val ACTION_VOICE_RESULT =
-            "com.diriabas.antonkeyboard.VOICE_RESULT"
-        const val EXTRA_TEXT = "recognized_text"
-
-        private const val REQUEST_MICROPHONE = 2001
-    }
-
     private var speechRecognizer: SpeechRecognizer? = null
-    private lateinit var statusText: TextView
-    private var language = "ru-RU"
-    private var started = false
+    private var isListening = false
+    private var permissionRequested = false
+
+    private var voiceLanguage = "ru-RU"
+
+    companion object {
+        private const val REQUEST_RECORD_AUDIO = 1001
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        language = intent.getStringExtra(EXTRA_LANGUAGE) ?: "ru-RU"
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(32, 40, 32, 40)
-            setBackgroundColor(0xFF171D2B.toInt())
-        }
-
-        statusText = TextView(this).apply {
-            text = "🎙️ Подготовка микрофона..."
-            textSize = 20f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(12, 20, 12, 24)
-        }
-
-        val cancelButton = Button(this).apply {
-            text = "Отмена"
-            isAllCaps = false
-            setOnClickListener {
-                finish()
-            }
-        }
-
-        root.addView(
-            statusText,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        )
-        root.addView(cancelButton)
-
-        setContentView(root)
+        voiceLanguage = intent.getStringExtra(
+            AntonInputMethodService.EXTRA_VOICE_LANGUAGE
+        ) ?: "ru-RU"
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
+            permissionRequested = true
             requestPermissions(
                 arrayOf(Manifest.permission.RECORD_AUDIO),
-                REQUEST_MICROPHONE
+                REQUEST_RECORD_AUDIO
             )
         } else {
-            startRecognition()
+            startVoiceRecognition()
         }
-    }
-
-    private fun startRecognition() {
-        if (started) return
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            showError("На устройстве не найден сервис распознавания речи.")
-            return
-        }
-
-        try {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-
-            speechRecognizer?.setRecognitionListener(
-                object : RecognitionListener {
-
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        statusText.text = "🎙️ Слушаю... Говорите"
-                    }
-
-                    override fun onBeginningOfSpeech() {
-                        statusText.text = "🎙️ Распознаю речь..."
-                    }
-
-                    override fun onRmsChanged(rmsdB: Float) {}
-
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-
-                    override fun onEndOfSpeech() {
-                        statusText.text = "Обрабатываю речь..."
-                    }
-
-                    override fun onError(error: Int) {
-                        showError(
-                            when (error) {
-                                SpeechRecognizer.ERROR_AUDIO ->
-                                    "Ошибка записи звука."
-                                SpeechRecognizer.ERROR_NETWORK ->
-                                    "Ошибка сети."
-                                SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
-                                    "Время ожидания сети истекло."
-                                SpeechRecognizer.ERROR_NO_MATCH ->
-                                    "Не удалось распознать речь. Попробуй ещё раз."
-                                SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                                    "Речь не обнаружена."
-                                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                                    "Нет разрешения на микрофон."
-                                SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
-                                    "Сервис распознавания занят."
-                                else ->
-                                    "Ошибка распознавания: $error"
-                            }
-                        )
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(
-                            SpeechRecognizer.RESULTS_RECOGNITION
-                        )
-
-                        val recognizedText = matches
-                            ?.firstOrNull()
-                            ?.trim()
-
-                        if (!recognizedText.isNullOrEmpty()) {
-                            sendResult(recognizedText)
-                        } else {
-                            showError("Речь не распознана.")
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {}
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                }
-            )
-
-            val recognitionIntent = Intent(
-                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-            ).apply {
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
-                    language
-                )
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            }
-
-            started = true
-            statusText.text = "🎙️ Запускаю распознавание..."
-            speechRecognizer?.startListening(recognitionIntent)
-
-        } catch (e: Exception) {
-            showError("Не удалось запустить распознавание речи.")
-        }
-    }
-
-    private fun sendResult(text: String) {
-        val resultIntent = Intent(ACTION_VOICE_RESULT).apply {
-            setPackage(packageName)
-            putExtra(EXTRA_TEXT, text)
-        }
-
-        sendBroadcast(resultIntent)
-        finish()
-    }
-
-    private fun showError(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        finish()
     }
 
     override fun onRequestPermissionsResult(
@@ -208,19 +54,193 @@ class VoiceRecognitionActivity : Activity() {
             grantResults
         )
 
-        if (requestCode == REQUEST_MICROPHONE) {
+        if (requestCode == REQUEST_RECORD_AUDIO) {
             if (grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             ) {
-                startRecognition()
+                startVoiceRecognition()
             } else {
-                showError("Для голосового ввода нужен доступ к микрофону.")
+                showMessage("Нет разрешения на использование микрофона")
+                finish()
             }
         }
     }
 
+    private fun startVoiceRecognition() {
+        if (isFinishing) return
+
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            showMessage(
+                "На устройстве нет доступного сервиса распознавания речи"
+            )
+            finish()
+            return
+        }
+
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+
+            speechRecognizer?.setRecognitionListener(
+                object : RecognitionListener {
+
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        showMessage("Говорите...")
+                    }
+
+                    override fun onBeginningOfSpeech() {
+                        isListening = true
+                    }
+
+                    override fun onRmsChanged(rmsdB: Float) {}
+
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+
+                    override fun onEndOfSpeech() {
+                        isListening = false
+                    }
+
+                    override fun onError(error: Int) {
+                        isListening = false
+                        showMessage(errorMessage(error))
+                        finish()
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        isListening = false
+
+                        val matches = results?.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION
+                        )
+
+                        val recognizedText = matches
+                            ?.firstOrNull()
+                            ?.trim()
+                            .orEmpty()
+
+                        if (recognizedText.isNotEmpty()) {
+                            sendResult(recognizedText)
+                        } else {
+                            showMessage("Речь не распознана")
+                        }
+
+                        finish()
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {}
+
+                    override fun onEvent(
+                        eventType: Int,
+                        params: Bundle?
+                    ) {}
+                }
+            )
+
+            val recognitionIntent = Intent(
+                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            ).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    voiceLanguage
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
+                    voiceLanguage
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                    false
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_MAX_RESULTS,
+                    3
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_PROMPT,
+                    if (voiceLanguage == "ru-RU") {
+                        "Говорите по-русски"
+                    } else {
+                        "Speak in English"
+                    }
+                )
+            }
+
+            speechRecognizer?.startListening(recognitionIntent)
+
+        } catch (e: Exception) {
+            showMessage("Не удалось запустить распознавание речи")
+            finish()
+        }
+    }
+
+    private fun sendResult(text: String) {
+        val resultIntent = Intent(
+            AntonInputMethodService.ACTION_VOICE_RESULT
+        ).apply {
+            setPackage(packageName)
+            putExtra(
+                AntonInputMethodService.EXTRA_VOICE_TEXT,
+                text
+            )
+        }
+
+        sendBroadcast(resultIntent)
+    }
+
+    private fun errorMessage(error: Int): String {
+        return when (error) {
+            SpeechRecognizer.ERROR_AUDIO ->
+                "Ошибка записи звука"
+
+            SpeechRecognizer.ERROR_CLIENT ->
+                "Ошибка запуска распознавания"
+
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                "Нет разрешения на микрофон"
+
+            SpeechRecognizer.ERROR_NETWORK ->
+                "Ошибка подключения к сети"
+
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+                "Превышено время ожидания сети"
+
+            SpeechRecognizer.ERROR_NO_MATCH ->
+                "Речь не распознана"
+
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                "Распознавание уже запущено"
+
+            SpeechRecognizer.ERROR_SERVER ->
+                "Ошибка сервера распознавания"
+
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                "Вы ничего не сказали"
+
+            else ->
+                "Ошибка распознавания речи"
+        }
+    }
+
+    private fun showMessage(message: String) {
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
     override fun onDestroy() {
-        speechRecognizer?.destroy()
+        isListening = false
+
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {
+        }
+
         speechRecognizer = null
         super.onDestroy()
     }
