@@ -1604,7 +1604,11 @@ class AntonInputMethodService : InputMethodService() {
                 "klavio_neon" -> neonKeyBackground(color)
                 else -> rounded(color, 8)
             }
-            elevation = dp(2).toFloat()
+            elevation = dp(3).toFloat()
+            if (selectedTheme == "klavio_neon" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                outlineAmbientShadowColor = Color.rgb(20, 170, 255)
+                outlineSpotShadowColor = Color.rgb(35, 205, 255)
+            }
             minHeight = 0
             minimumHeight = 0
             isFocusable = false
@@ -1614,8 +1618,14 @@ class AntonInputMethodService : InputMethodService() {
 
             if (repeatAction == null && longPressAction == null) {
                 setOnTouchListener { view, event ->
-                    if (event.action == MotionEvent.ACTION_DOWN) {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            applyNeonKeyPressEffect(view, color, true)
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
+                            applyNeonKeyPressEffect(view, color, false)
+                        }
                     }
                     false
                 }
@@ -1634,16 +1644,19 @@ class AntonInputMethodService : InputMethodService() {
                         MotionEvent.ACTION_DOWN -> {
                             longPressed = false
                             hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            applyNeonKeyPressEffect(hapticView, color, true)
                             handler.postDelayed(longPressTask, 450L)
                             true
                         }
                         MotionEvent.ACTION_UP -> {
                             handler.removeCallbacks(longPressTask)
+                            applyNeonKeyPressEffect(hapticView, color, false)
                             if (!longPressed) action()
                             true
                         }
                         MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
                             handler.removeCallbacks(longPressTask)
+                            applyNeonKeyPressEffect(hapticView, color, false)
                             true
                         }
                         else -> true
@@ -1665,16 +1678,19 @@ class AntonInputMethodService : InputMethodService() {
                         MotionEvent.ACTION_DOWN -> {
                             repeating = false
                             hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            applyNeonKeyPressEffect(hapticView, color, true)
                             handler.postDelayed(repeatTask, 350L)
                             true
                         }
                         MotionEvent.ACTION_UP -> {
                             handler.removeCallbacks(repeatTask)
+                            applyNeonKeyPressEffect(hapticView, color, false)
                             if (!repeating) action()
                             true
                         }
                         MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
                             handler.removeCallbacks(repeatTask)
+                            applyNeonKeyPressEffect(hapticView, color, false)
                             true
                         }
                         else -> true
@@ -1726,17 +1742,38 @@ class AntonInputMethodService : InputMethodService() {
         return symbols[letter] ?: ""
     }
 
-    private fun neonKeyBackground(color: Int): GradientDrawable {
+    private fun neonKeyBackground(color: Int, pressed: Boolean = false): GradientDrawable {
+        val top = if (pressed) Color.rgb(65, 205, 255) else lighten(color, 1.42f)
+        val middle = if (pressed) Color.rgb(28, 112, 205) else color
+        val bottom = if (pressed) Color.rgb(12, 48, 112) else darken(color, 0.68f)
+
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                lighten(color, 1.28f),
-                color,
-                darken(color, 0.72f)
-            )
+            intArrayOf(top, middle, bottom)
         ).apply {
-            cornerRadius = dp(9).toFloat()
-            setStroke(dp(1), Color.argb(220, 45, 205, 255))
+            cornerRadius = dp(10).toFloat()
+            setStroke(
+                dp(if (pressed) 2 else 1),
+                if (pressed) Color.rgb(145, 240, 255)
+                else Color.argb(235, 55, 215, 255)
+            )
+        }
+    }
+
+    private fun applyNeonKeyPressEffect(view: View, keyColor: Int, pressed: Boolean) {
+        if (selectedTheme != "klavio_neon") return
+
+        view.background = neonKeyBackground(keyColor, pressed)
+        view.animate().cancel()
+        view.animate()
+            .scaleX(if (pressed) 0.95f else 1f)
+            .scaleY(if (pressed) 0.95f else 1f)
+            .alpha(if (pressed) 0.96f else 1f)
+            .setDuration(if (pressed) 55L else 105L)
+            .start()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            view.translationZ = if (pressed) dp(7).toFloat() else dp(2).toFloat()
         }
     }
 
