@@ -1,4 +1,3 @@
-
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -11,6 +10,7 @@
 
     <application
         android:label="Klavio"
+        android:icon="@drawable/klavio_icon"
         android:allowBackup="false"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
