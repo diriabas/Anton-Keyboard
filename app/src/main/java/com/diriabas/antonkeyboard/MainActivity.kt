@@ -1,4 +1,3 @@
-
 package com.diriabas.antonkeyboard
 
 import android.Manifest
@@ -34,7 +33,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "✦  ANTON KEYBOARD"
+            text = "✦  KLAVIO"
             textSize = 25f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.rgb(67, 205, 255))
@@ -50,7 +49,7 @@ class MainActivity : Activity() {
         }
 
         val enableButton = Button(this).apply {
-            text = "Включить Anton Keyboard"
+            text = "Включить Klavio"
             isAllCaps = false
             setOnClickListener {
                 startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
