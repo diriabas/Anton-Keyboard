@@ -3,8 +3,10 @@ package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.content.ClipboardManager
@@ -60,6 +62,37 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
+
+    private val voiceResultAction = "com.diriabas.antonkeyboard.VOICE_RESULT"
+    private val voiceTextExtra = "voice_text"
+    private val voiceLanguageExtra = "voice_language"
+    private var voiceReceiverRegistered = false
+
+    private val voiceResultReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != voiceResultAction) return
+            val recognizedText = intent.getStringExtra(voiceTextExtra)?.trim().orEmpty()
+            if (recognizedText.isEmpty()) return
+
+            val textToInsert = if (recognizedText.lastOrNull()?.isWhitespace() == true) {
+                recognizedText
+            } else {
+                "$recognizedText "
+            }
+
+            val connection = currentInputConnection
+            if (connection != null) {
+                connection.commitText(textToInsert, 1)
+                updateSuggestions()
+            } else {
+                Toast.makeText(
+                    this@AntonInputMethodService,
+                    "Поле ввода больше не активно",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
     private var suggestionsRow: LinearLayout? = null
     private var spellCheckerSession: SpellCheckerSession? = null
     private var spellCheckerLocale: Locale? = null
@@ -221,6 +254,19 @@ class AntonInputMethodService : InputMethodService() {
         loadKeyboardSettings()
         loadPersonalWords()
         loadTheme()
+
+        val voiceFilter = IntentFilter(voiceResultAction)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                voiceResultReceiver,
+                voiceFilter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(voiceResultReceiver, voiceFilter)
+        }
+        voiceReceiverRegistered = true
     }
 
     // Do not switch to Android's fullscreen extract editor in landscape.
@@ -230,7 +276,36 @@ class AntonInputMethodService : InputMethodService() {
     override fun onDestroy() {
         spellCheckerSession?.close()
         spellCheckerSession = null
+        if (voiceReceiverRegistered) {
+            try {
+                unregisterReceiver(voiceResultReceiver)
+            } catch (_: Exception) {
+            }
+            voiceReceiverRegistered = false
+        }
         super.onDestroy()
+    }
+
+    private fun launchVoiceRecognition() {
+        try {
+            val voiceIntent = Intent(
+                this,
+                VoiceRecognitionActivity::class.java
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(
+                    voiceLanguageExtra,
+                    if (isRussian) "ru-RU" else "en-US"
+                )
+            }
+            startActivity(voiceIntent)
+        } catch (_: Exception) {
+            Toast.makeText(
+                this,
+                "Не удалось открыть голосовой ввод",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     override fun onCreateInputView(): View {
@@ -567,6 +642,10 @@ class AntonInputMethodService : InputMethodService() {
             isSettings = false
             isSymbols = false
             refresh()
+        }
+
+        addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 28) {
+            launchVoiceRecognition()
         }
 
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 28) {
