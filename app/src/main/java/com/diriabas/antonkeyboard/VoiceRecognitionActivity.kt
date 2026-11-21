@@ -233,12 +233,14 @@ class VoiceRecognitionActivity : Activity() {
         }
     }
 
-    private fun showMessage(message: String) {
-        Toast.makeText(
-            this,
-            message,
-            Toast.LENGTH_SHORT
-        ).show()
+    private fun sendResult(recognizedText: String) {
+    if (resultSent) return
+
+    resultSent = true
+
+    val resultIntent = Intent()
+    resultIntent.action = ACTION_VOICE_RESULT
+    resultIntent.setPackage(packageName)
     }
 
     override fun onDestroy() {
