@@ -11,9 +11,20 @@
     <application
         android:label="Klavio"
         android:icon="@drawable/klavio_icon"
+        android:roundIcon="@drawable/klavio_icon"
         android:allowBackup="false"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:label="Klavio"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".VoiceRecognitionActivity"
@@ -34,7 +45,6 @@
             <meta-data
                 android:name="android.view.im"
                 android:resource="@xml/method" />
-
         </service>
 
     </application>
