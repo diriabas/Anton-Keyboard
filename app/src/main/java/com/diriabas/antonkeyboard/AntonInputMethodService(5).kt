@@ -875,7 +875,10 @@ class AntonInputMethodService : InputMethodService() {
                     // Shift is a persistent manual toggle: it stays enabled
                     // until the user presses Shift again. Typing a letter does
                     // not turn it off automatically.
-                    if (wasSymbols) refresh() else updateSuggestions()
+                    // Rebuild the key labels after each character so the
+                    // visible layout follows automatic sentence capitalization.
+                    // Manual Shift remains enabled until the user toggles it off.
+                    refresh()
                 }
             }
 
