@@ -63,6 +63,8 @@ class AntonInputMethodService : InputMethodService() {
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
+    private val letterKeyButtons = mutableListOf<Pair<Button, String>>()
+    private var shiftKeyButton: Button? = null
 
     private val voiceResultAction = "com.diriabas.antonkeyboard.VOICE_RESULT"
     private val voiceTextExtra = "voice_text"
@@ -814,6 +816,8 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun showLetters(root: LinearLayout) {
+        letterKeyButtons.clear()
+        shiftKeyButton = null
         val rows = when {
             isSymbols -> listOf(
                 listOf("1","2","3","4","5","6","7","8","9","0"),
@@ -838,7 +842,7 @@ class AntonInputMethodService : InputMethodService() {
             val row = newRow()
 
             if (index == 2) {
-                addKey(
+                shiftKeyButton = addKey(
                     row,
                     if (capsLock) "⇪" else "⇧",
                     1.3f,
@@ -849,7 +853,7 @@ class AntonInputMethodService : InputMethodService() {
             }
 
             keys.forEach { key ->
-                addKey(
+                val letterButton = addKey(
                     row,
                     displayLetter(key),
                     1f,
@@ -863,23 +867,19 @@ class AntonInputMethodService : InputMethodService() {
                     }
                 ) {
                     val wasSymbols = isSymbols
+                    val emailContext = isEmailAddressContext()
                     if (wasSymbols && key in listOf(",", ".", "!", "?", ";", ":")) {
                         commitPunctuation(key)
                     } else {
-                        currentInputConnection?.commitText(displayLetter(key), 1)
+                        val value = if (emailContext) key.lowercase(Locale.ROOT) else displayLetter(key)
+                        currentInputConnection?.commitText(value, 1)
                     }
-                    // Keep the symbols/numbers layout active after every key.
-                    // Otherwise the first digit switches back to letters and
-                    // multi-digit values (for example 100) cannot be entered.
-
-                    // Shift is a persistent manual toggle: it stays enabled
-                    // until the user presses Shift again. Typing a letter does
-                    // not turn it off automatically.
-                    // Rebuild the key labels after each character so the
-                    // visible layout follows automatic sentence capitalization.
-                    // Manual Shift remains enabled until the user toggles it off.
-                    refresh()
+                    // Keep symbols active; update existing letter labels in place.
+                    // Rebuilding the entire view on every tap could interrupt rapid input.
+                    updateLetterKeyLabels()
+                    updateSuggestions()
                 }
+                letterKeyButtons.add(letterButton to key)
             }
 
             if (index == 2) {
@@ -1288,10 +1288,28 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun displayLetter(letter: String): String {
-        // Manual Shift/Caps Lock takes priority. Otherwise capitalize only
-        // at the beginning of a sentence, based on the text before the cursor.
+        // Email addresses are always entered in lowercase, even when manual Shift is on.
+        if (isEmailAddressContext()) return letter.lowercase(Locale.ROOT)
+
+        // Manual Shift is independent from automatic sentence capitalization.
         val uppercase = shift || capsLock || shouldCapitalizeNext()
-        return if (uppercase) letter.uppercase() else letter.lowercase()
+        return if (uppercase) letter.uppercase(Locale.ROOT) else letter.lowercase(Locale.ROOT)
+    }
+
+    private fun updateLetterKeyLabels() {
+        // Update existing views only: do not rebuild the keyboard during typing.
+        letterKeyButtons.forEach { (button, key) ->
+            button.text = displayLetter(key)
+        }
+        shiftKeyButton?.apply {
+            text = if (capsLock) "⇪" else "⇧"
+            val shiftColor = if (shift || capsLock) violetColor else keyColor
+            background = when (selectedTheme) {
+                "new_year" -> festiveKeyBackground(shiftColor)
+                "klavio_neon" -> neonKeyBackground(shiftColor)
+                else -> rounded(shiftColor, 8)
+            }
+        }
     }
 
     private fun handleShift() {
@@ -1625,7 +1643,7 @@ class AntonInputMethodService : InputMethodService() {
         repeatAction: (() -> Unit)? = null,
         longPressAction: (() -> Unit)? = null,
         action: () -> Unit
-    ) {
+    ): Button {
         // Keep the main glyph in its own centered TextView. Secondary symbols
         // are an independent top-right label, so they cannot shift the letter baseline.
         val keyFrame = FrameLayout(this)
@@ -1785,6 +1803,7 @@ class AntonInputMethodService : InputMethodService() {
             setMargins(dp(2), dp(2), dp(2), dp(2))
         }
         row.addView(keyFrame, params)
+        return button
     }
 
     private fun secondarySymbol(letter: String): String {
