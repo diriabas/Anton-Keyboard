@@ -1430,23 +1430,61 @@ class AntonInputMethodService : InputMethodService() {
             return
         }
 
-        val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(2), 0, dp(4))
+        }
+
+        // Two-column grid with square tiles sized to the available screen width.
+        val tileSize = ((resources.displayMetrics.widthPixels - dp(30)) / 2)
+            .coerceIn(dp(92), dp(220))
+
         var tileRow: LinearLayout? = null
         clipboardHistory.forEachIndexed { index, item ->
             if (index % 2 == 0) {
                 tileRow = newRow()
                 content.addView(tileRow)
             }
-            val preview = item.replace("\n", " ").take(58)
-            addTile(tileRow!!, "${index + 1}. $preview", "Нажми, чтобы вставить", false) {
-                currentInputConnection?.commitText(item, 1)
-                isEmoji = false
-                isSymbols = false
-                isAI = false
-                isSettings = false
-                refresh()
-                Toast.makeText(this, "Текст вставлен", Toast.LENGTH_SHORT).show()
+
+            val preview = item.replace(Regex("\\s+"), " ").trim().take(90)
+            val tile = Button(this).apply {
+                text = "${index + 1}.\\n$preview"
+                textSize = 10f
+                isAllCaps = false
+                maxLines = 5
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                setTextColor(textColorForTheme())
+                setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                minHeight = 0
+                minimumHeight = 0
+                setPadding(dp(7), dp(7), dp(7), dp(7))
+                background = rounded(keyColor, 12)
+                elevation = dp(2).toFloat()
+                contentDescription = "Вставить запись ${index + 1}: $preview"
+                setOnClickListener {
+                    currentInputConnection?.commitText(item, 1)
+                    isEmoji = false
+                    isSymbols = false
+                    isAI = false
+                    isSettings = false
+                    refresh()
+                    Toast.makeText(this@AntonInputMethodService, "Текст вставлен", Toast.LENGTH_SHORT).show()
+                }
+            }
+            tileRow!!.addView(tile, LinearLayout.LayoutParams(0, tileSize, 1f).apply {
+                setMargins(dp(3), dp(3), dp(3), dp(3))
+            })
+
+            if (index == clipboardHistory.lastIndex && index % 2 == 0) {
+                tileRow!!.addView(View(this), LinearLayout.LayoutParams(0, tileSize, 1f).apply {
+                    setMargins(dp(3), dp(3), dp(3), dp(3))
+                })
             }
         }
         scroll.addView(content)
