@@ -60,9 +60,6 @@ class AntonInputMethodService : InputMethodService() {
 
     private var shift = false
     private var capsLock = false
-    // null = automatic sentence capitalization; true/false = explicit user choice.
-    private var manualShiftOverride: Boolean? = null
-    private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
     private val letterKeyButtons = mutableListOf<Pair<Button, String>>()
@@ -879,6 +876,12 @@ class AntonInputMethodService : InputMethodService() {
                     } else {
                         val value = if (emailContext) key.lowercase(Locale.ROOT) else displayLetter(key)
                         currentInputConnection?.commitText(value, 1)
+                        // Shift is one-shot: after one typed letter, return to
+                        // automatic sentence case (first letter uppercase, next lowercase).
+                        if (!emailContext && key.length == 1 && key[0].isLetter()) {
+                            shift = false
+                            capsLock = false
+                        }
                     }
                     // Keep symbols active; update existing letter labels in place.
                     // Rebuilding the entire view on every tap could interrupt rapid input.
@@ -1282,7 +1285,6 @@ class AntonInputMethodService : InputMethodService() {
             connection.commitText("@", 1)
             shift = false
             capsLock = false
-            manualShiftOverride = false
             return
         }
         connection.commitText(symbol, 1)
@@ -1328,9 +1330,9 @@ class AntonInputMethodService : InputMethodService() {
         // Email addresses are always entered in lowercase, even when manual Shift is on.
         if (isEmailAddressContext()) return letter.lowercase(Locale.ROOT)
 
-        // An explicit Shift choice wins over automatic sentence capitalization.
-        // This prevents auto-capitalization from making Shift appear stuck ON.
-        val uppercase = manualShiftOverride ?: (shift || capsLock || shouldCapitalizeNext())
+        // Manual Shift applies to the next letter only. Otherwise capitalize
+        // only at the beginning of a sentence; following letters are lowercase.
+        val uppercase = shift || capsLock || shouldCapitalizeNext()
         return if (uppercase) letter.uppercase(Locale.ROOT) else letter.lowercase(Locale.ROOT)
     }
 
@@ -1351,13 +1353,10 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun handleShift() {
-        // One press turns uppercase on; the next press turns it off.
-        // The state remains unchanged while typing letters.
-        val nextState = !(manualShiftOverride ?: false)
-        manualShiftOverride = nextState
-        shift = nextState
+        // A single tap arms uppercase for the next letter only.
+        // It is never latched into Caps Lock by a rapid double tap.
+        shift = !shift
         capsLock = false
-        lastShiftTap = 0L
         updateLetterKeyLabels()
     }
 
