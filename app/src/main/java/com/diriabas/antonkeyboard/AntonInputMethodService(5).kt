@@ -735,6 +735,12 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 28) {
+    Toast.makeText(
+        this@AntonInputMethodService,
+        "МИКРОФОН: НАЖАТИЕ ПОЛУЧЕНО",
+        Toast.LENGTH_SHORT
+    ).show()
+
     launchVoiceRecognition()
 }
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 28) {
