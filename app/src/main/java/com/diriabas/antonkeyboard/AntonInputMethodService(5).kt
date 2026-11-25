@@ -60,6 +60,8 @@ class AntonInputMethodService : InputMethodService() {
 
     private var shift = false
     private var capsLock = false
+    // null = automatic sentence capitalization; true/false = explicit user choice.
+    private var manualShiftOverride: Boolean? = null
     private var lastShiftTap = 0L
 
     private var keyboardRoot: LinearLayout? = null
@@ -97,6 +99,8 @@ class AntonInputMethodService : InputMethodService() {
         }
     }
     private var suggestionsRow: LinearLayout? = null
+    private val suggestionUpdateHandler = Handler(Looper.getMainLooper())
+    private val suggestionUpdateTask = Runnable { updateSuggestions() }
     private var spellCheckerSession: SpellCheckerSession? = null
     private var spellCheckerLocale: Locale? = null
     private var requestedSpellWord: String = ""
@@ -860,7 +864,7 @@ class AntonInputMethodService : InputMethodService() {
                     longPressAction = {
                         val secondary = secondarySymbol(key.lowercase(Locale.ROOT))
                         if (secondary.isNotEmpty()) {
-                            currentInputConnection?.commitText(secondary, 1)
+                            commitKeyboardSymbol(secondary)
                             isSymbols = false
                             refresh()
                         }
@@ -870,6 +874,8 @@ class AntonInputMethodService : InputMethodService() {
                     val emailContext = isEmailAddressContext()
                     if (wasSymbols && key in listOf(",", ".", "!", "?", ";", ":")) {
                         commitPunctuation(key)
+                    } else if (wasSymbols && key == "@") {
+                        commitKeyboardSymbol("@")
                     } else {
                         val value = if (emailContext) key.lowercase(Locale.ROOT) else displayLetter(key)
                         currentInputConnection?.commitText(value, 1)
@@ -877,7 +883,7 @@ class AntonInputMethodService : InputMethodService() {
                     // Keep symbols active; update existing letter labels in place.
                     // Rebuilding the entire view on every tap could interrupt rapid input.
                     updateLetterKeyLabels()
-                    updateSuggestions()
+                    scheduleSuggestionsUpdate()
                 }
                 letterKeyButtons.add(letterButton to key)
             }
@@ -962,6 +968,13 @@ class AntonInputMethodService : InputMethodService() {
             }
         }
         root.addView(row, 0)
+    }
+
+    // Debounce suggestion-row rendering while typing so the keyboard does not
+    // repeatedly remove/add views between rapid consecutive taps.
+    private fun scheduleSuggestionsUpdate() {
+        suggestionUpdateHandler.removeCallbacks(suggestionUpdateTask)
+        suggestionUpdateHandler.postDelayed(suggestionUpdateTask, 100L)
     }
 
     // Update only the suggestion strip; rebuilding the full keyboard on every
@@ -1251,6 +1264,30 @@ class AntonInputMethodService : InputMethodService() {
         return currentToken.contains('@')
     }
 
+    /** Insert a secondary symbol. When @ starts an address, normalize the local part
+     * already typed so the complete address is lowercase, even in a generic text field.
+     */
+    private fun commitKeyboardSymbol(symbol: String) {
+        val connection = currentInputConnection ?: return
+        if (symbol == "@") {
+            val before = connection.getTextBeforeCursor(256, 0)?.toString().orEmpty()
+            val token = before.takeLastWhile { !it.isWhitespace() }
+            if (token.isNotEmpty()) {
+                val lowerToken = token.lowercase(Locale.ROOT)
+                if (token != lowerToken) {
+                    connection.deleteSurroundingText(token.length, 0)
+                    connection.commitText(lowerToken, 1)
+                }
+            }
+            connection.commitText("@", 1)
+            shift = false
+            capsLock = false
+            manualShiftOverride = false
+            return
+        }
+        connection.commitText(symbol, 1)
+    }
+
     private fun commitPunctuation(symbol: String) {
         val connection = currentInputConnection ?: return
         val emailContext = isEmailAddressContext()
@@ -1291,8 +1328,9 @@ class AntonInputMethodService : InputMethodService() {
         // Email addresses are always entered in lowercase, even when manual Shift is on.
         if (isEmailAddressContext()) return letter.lowercase(Locale.ROOT)
 
-        // Manual Shift is independent from automatic sentence capitalization.
-        val uppercase = shift || capsLock || shouldCapitalizeNext()
+        // An explicit Shift choice wins over automatic sentence capitalization.
+        // This prevents auto-capitalization from making Shift appear stuck ON.
+        val uppercase = manualShiftOverride ?: (shift || capsLock || shouldCapitalizeNext())
         return if (uppercase) letter.uppercase(Locale.ROOT) else letter.lowercase(Locale.ROOT)
     }
 
@@ -1315,10 +1353,12 @@ class AntonInputMethodService : InputMethodService() {
     private fun handleShift() {
         // One press turns uppercase on; the next press turns it off.
         // The state remains unchanged while typing letters.
-        shift = !shift
+        val nextState = !(manualShiftOverride ?: false)
+        manualShiftOverride = nextState
+        shift = nextState
         capsLock = false
         lastShiftTap = 0L
-        refresh()
+        updateLetterKeyLabels()
     }
 
     private fun showEmoji(root: LinearLayout) {
@@ -1694,9 +1734,9 @@ class AntonInputMethodService : InputMethodService() {
                 val hapticView = this
                 val handler = Handler(Looper.getMainLooper())
                 var longPressed = false
-                var touchCancelled = false
+                var longPressCancelled = false
                 val longPressTask = Runnable {
-                    if (!touchCancelled) {
+                    if (!longPressCancelled) {
                         longPressed = true
                         hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         longPressAction?.invoke()
@@ -1706,17 +1746,17 @@ class AntonInputMethodService : InputMethodService() {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
                             longPressed = false
-                            touchCancelled = false
+                            longPressCancelled = false
                             hapticView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             applyNeonKeyPressEffect(hapticView, color, true)
-                            // Give a normal tap more time before triggering the secondary symbol.
+                            // A stationary hold selects the secondary symbol; a normal tap inserts the letter.
                             handler.postDelayed(longPressTask, 600L)
                             true
                         }
                         MotionEvent.ACTION_MOVE -> {
-                            // If the finger slides off this key, cancel this key's action.
+                            // Moving outside cancels only the long-press gesture, not the normal tap.
                             if (event.x < 0f || event.x > view.width || event.y < 0f || event.y > view.height) {
-                                touchCancelled = true
+                                longPressCancelled = true
                                 handler.removeCallbacks(longPressTask)
                                 applyNeonKeyPressEffect(hapticView, color, false)
                             }
@@ -1725,11 +1765,11 @@ class AntonInputMethodService : InputMethodService() {
                         MotionEvent.ACTION_UP -> {
                             handler.removeCallbacks(longPressTask)
                             applyNeonKeyPressEffect(hapticView, color, false)
-                            if (!longPressed && !touchCancelled) action()
+                            if (!longPressed) action()
                             true
                         }
                         MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
-                            touchCancelled = true
+                            longPressCancelled = true
                             handler.removeCallbacks(longPressTask)
                             applyNeonKeyPressEffect(hapticView, color, false)
                             true
