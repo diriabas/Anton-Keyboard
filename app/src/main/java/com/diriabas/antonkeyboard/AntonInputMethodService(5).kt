@@ -734,41 +734,9 @@ class AntonInputMethodService : InputMethodService() {
             refresh()
         }
 
-        val microphoneButton = addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 28) {
-            // Fallback action for accessibility/click activation.
-            Toast.makeText(this@AntonInputMethodService, "Кнопка микрофона нажата", Toast.LENGTH_SHORT).show()
-            launchVoiceRecognition()
-        }
-        // Give the microphone its own touch handler instead of relying on the
-        // generic addKey click/touch handling used by the other toolbar keys.
-        microphoneButton.isClickable = true
-        microphoneButton.isFocusable = false
-        microphoneButton.setOnTouchListener { view, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    view.alpha = 0.55f
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    view.alpha = 1f
-                    if (event.x >= 0f && event.x <= view.width && event.y >= 0f && event.y <= view.height) {
-                        view.performClick()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
-                    view.alpha = 1f
-                    true
-                }
-                else -> true
-            }
-        }
-        microphoneButton.setOnClickListener {
-            Toast.makeText(this@AntonInputMethodService, "Кнопка микрофона нажата", Toast.LENGTH_SHORT).show()
-            launchVoiceRecognition()
-        }
-
+        addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 28) {
+    launchVoiceRecognition()
+}
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 28) {
             isRussian = !isRussian
             isSymbols = false
