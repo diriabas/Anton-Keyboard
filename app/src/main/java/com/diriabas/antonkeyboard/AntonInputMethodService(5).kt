@@ -735,6 +735,8 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 28) {
+            // Diagnostic feedback confirms that the microphone key receives the tap.
+            Toast.makeText(this@AntonInputMethodService, "Кнопка микрофона нажата", Toast.LENGTH_SHORT).show()
             launchVoiceRecognition()
         }
 
