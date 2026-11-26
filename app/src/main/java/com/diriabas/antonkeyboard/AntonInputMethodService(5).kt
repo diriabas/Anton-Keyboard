@@ -3,8 +3,10 @@ package com.diriabas.antonkeyboard
 
 import android.inputmethodservice.InputMethodService
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.content.ClipboardManager
@@ -37,9 +39,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import java.util.Locale
 import org.json.JSONArray
 
@@ -61,15 +60,42 @@ class AntonInputMethodService : InputMethodService() {
 
     private var shift = false
     private var capsLock = false
+    private var forceLowercaseNext = false
 
     private var keyboardRoot: LinearLayout? = null
     private val letterKeyButtons = mutableListOf<Pair<Button, String>>()
     private var shiftKeyButton: Button? = null
 
-    // Speech recognition runs inside the IME service, so opening the microphone
-    // does not launch another Activity or hide the keyboard.
-    private var speechRecognizer: SpeechRecognizer? = null
-    private var voiceRecognitionActive = false
+    private val voiceResultAction = "com.diriabas.antonkeyboard.VOICE_RESULT"
+    private val voiceTextExtra = "voice_text"
+    private val voiceLanguageExtra = "voice_language"
+    private var voiceReceiverRegistered = false
+
+    private val voiceResultReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != voiceResultAction) return
+            val recognizedText = intent.getStringExtra(voiceTextExtra)?.trim().orEmpty()
+            if (recognizedText.isEmpty()) return
+
+            val textToInsert = if (recognizedText.lastOrNull()?.isWhitespace() == true) {
+                recognizedText
+            } else {
+                "$recognizedText "
+            }
+
+            val connection = currentInputConnection
+            if (connection != null) {
+                connection.commitText(textToInsert, 1)
+                updateSuggestions()
+            } else {
+                Toast.makeText(
+                    this@AntonInputMethodService,
+                    "Поле ввода больше не активно",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
     private var suggestionsRow: LinearLayout? = null
     private val suggestionUpdateHandler = Handler(Looper.getMainLooper())
     private val suggestionUpdateTask = Runnable { updateSuggestions() }
@@ -234,6 +260,18 @@ class AntonInputMethodService : InputMethodService() {
         loadPersonalWords()
         loadTheme()
 
+        val voiceFilter = IntentFilter(voiceResultAction)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                voiceResultReceiver,
+                voiceFilter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(voiceResultReceiver, voiceFilter)
+        }
+        voiceReceiverRegistered = true
     }
 
     // Do not switch to Android's fullscreen extract editor in landscape.
@@ -243,133 +281,35 @@ class AntonInputMethodService : InputMethodService() {
     override fun onDestroy() {
         spellCheckerSession?.close()
         spellCheckerSession = null
-        releaseVoiceRecognizer(cancel = true)
+        if (voiceReceiverRegistered) {
+            try {
+                unregisterReceiver(voiceResultReceiver)
+            } catch (_: Exception) {
+            }
+            voiceReceiverRegistered = false
+        }
         super.onDestroy()
     }
 
     private fun launchVoiceRecognition() {
-        if (voiceRecognitionActive) {
-            Toast.makeText(this, "Распознавание уже запущено", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            Toast.makeText(
-                this,
-                "Разреши Klavio доступ к микрофону в настройках приложений.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(
-                this,
-                "Не найден системный сервис распознавания речи. Проверь Google голосовой ввод.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
         try {
-            val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
-            speechRecognizer = recognizer
-            voiceRecognitionActive = true
-
-            recognizer.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    Toast.makeText(
-                        this@AntonInputMethodService,
-                        if (isRussian) "Говори по-русски" else "Speak in English",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-
-                override fun onBeginningOfSpeech() = Unit
-                override fun onRmsChanged(rmsdB: Float) = Unit
-                override fun onBufferReceived(buffer: ByteArray?) = Unit
-                override fun onEndOfSpeech() = Unit
-                override fun onPartialResults(partialResults: Bundle?) = Unit
-                override fun onEvent(eventType: Int, params: Bundle?) = Unit
-
-                override fun onResults(results: Bundle?) {
-                    val recognizedText = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull { it.isNotBlank() }
-                        ?.trim()
-
-                    if (!recognizedText.isNullOrEmpty()) {
-                        val textToInsert = if (recognizedText.lastOrNull()?.isWhitespace() == true) {
-                            recognizedText
-                        } else {
-                            "$recognizedText "
-                        }
-                        currentInputConnection?.commitText(textToInsert, 1)
-                        updateSuggestions()
-                    } else {
-                        Toast.makeText(
-                            this@AntonInputMethodService,
-                            "Речь не распознана. Попробуй ещё раз.",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    releaseVoiceRecognizer(cancel = false)
-                }
-
-                override fun onError(error: Int) {
-                    val message = when (error) {
-                        SpeechRecognizer.ERROR_AUDIO -> "Ошибка записи звука. Проверь микрофон."
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Нет разрешения на использование микрофона."
-                        SpeechRecognizer.ERROR_NETWORK,
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Нет соединения с сервисом распознавания. Проверь интернет."
-                        SpeechRecognizer.ERROR_NO_MATCH,
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Речь не распознана. Попробуй ещё раз."
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Сервис распознавания занят. Попробуй позже."
-                        SpeechRecognizer.ERROR_SERVER -> "Сервис распознавания временно недоступен."
-                        SpeechRecognizer.ERROR_CLIENT -> "Голосовой ввод остановлен."
-                        else -> "Ошибка распознавания речи (код $error)."
-                    }
-                    releaseVoiceRecognizer(cancel = false)
-                    if (error != SpeechRecognizer.ERROR_CLIENT) {
-                        Toast.makeText(this@AntonInputMethodService, message, Toast.LENGTH_LONG).show()
-                    }
-                }
-            })
-
-            val recognitionIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (isRussian) "ru-RU" else "en-US")
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, if (isRussian) "ru-RU" else "en-US")
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            val voiceIntent = Intent(
+                this,
+                VoiceRecognitionActivity::class.java
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(
+                    voiceLanguageExtra,
+                    if (isRussian) "ru-RU" else "en-US"
+                )
             }
-
-            recognizer.startListening(recognitionIntent)
-        } catch (_: SecurityException) {
-            releaseVoiceRecognizer(cancel = true)
-            Toast.makeText(this, "Нет доступа к микрофону. Проверь разрешение для Klavio.", Toast.LENGTH_LONG).show()
+            startActivity(voiceIntent)
         } catch (_: Exception) {
-            releaseVoiceRecognizer(cancel = true)
-            Toast.makeText(this, "Не удалось запустить распознавание речи.", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun releaseVoiceRecognizer(cancel: Boolean) {
-        val recognizer = speechRecognizer
-        speechRecognizer = null
-        voiceRecognitionActive = false
-        if (recognizer != null) {
-            try {
-                if (cancel) recognizer.cancel()
-            } catch (_: Exception) {
-            }
-            try {
-                recognizer.destroy()
-            } catch (_: Exception) {
-            }
+            Toast.makeText(
+                this,
+                "Не удалось открыть голосовой ввод",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -735,14 +675,9 @@ class AntonInputMethodService : InputMethodService() {
         }
 
         addKey(toolbar, "🎙", 0.9f, violetColor, keyHeight = 28) {
-    Toast.makeText(
-        this@AntonInputMethodService,
-        "МИКРОФОН: НАЖАТИЕ ПОЛУЧЕНО",
-        Toast.LENGTH_SHORT
-    ).show()
+            launchVoiceRecognition()
+        }
 
-    launchVoiceRecognition()
-}
         addKey(toolbar, "🌐", 1f, keyColor, keyHeight = 28) {
             isRussian = !isRussian
             isSymbols = false
@@ -947,6 +882,7 @@ class AntonInputMethodService : InputMethodService() {
                         if (!emailContext && key.length == 1 && key[0].isLetter()) {
                             shift = false
                             capsLock = false
+                            forceLowercaseNext = false
                         }
                     }
                     // Keep symbols active; update existing letter labels in place.
@@ -1351,6 +1287,7 @@ class AntonInputMethodService : InputMethodService() {
             connection.commitText("@", 1)
             shift = false
             capsLock = false
+            forceLowercaseNext = false
             return
         }
         connection.commitText(symbol, 1)
@@ -1396,9 +1333,14 @@ class AntonInputMethodService : InputMethodService() {
         // Email addresses are always entered in lowercase, even when manual Shift is on.
         if (isEmailAddressContext()) return letter.lowercase(Locale.ROOT)
 
-        // Manual Shift applies to the next letter only. Otherwise capitalize
-        // only at the beginning of a sentence; following letters are lowercase.
-        val uppercase = shift || capsLock || shouldCapitalizeNext()
+        // Manual Shift/Caps Lock take priority. At the start of a sentence,
+        // Shift can explicitly override automatic capitalization with lowercase.
+        val uppercase = when {
+            capsLock -> true
+            shift -> true
+            forceLowercaseNext -> false
+            else -> shouldCapitalizeNext()
+        }
         return if (uppercase) letter.uppercase(Locale.ROOT) else letter.lowercase(Locale.ROOT)
     }
 
@@ -1419,9 +1361,26 @@ class AntonInputMethodService : InputMethodService() {
     }
 
     private fun handleShift() {
-        // A single tap arms uppercase for the next letter only.
-        // It is never latched into Caps Lock by a rapid double tap.
-        shift = !shift
+        // At an automatically capitalized sentence start, the first Shift tap
+        // explicitly requests lowercase. A second tap switches back to uppercase.
+        when {
+            shift -> {
+                shift = false
+                forceLowercaseNext = false
+            }
+            forceLowercaseNext -> {
+                forceLowercaseNext = false
+                shift = true
+            }
+            !capsLock && shouldCapitalizeNext() -> {
+                forceLowercaseNext = true
+                shift = false
+            }
+            else -> {
+                shift = true
+                forceLowercaseNext = false
+            }
+        }
         capsLock = false
         updateLetterKeyLabels()
     }
